@@ -1,95 +1,106 @@
 # codexU
 
-codexU is a local macOS desktop widget for Codex usage. It reads account quota from the official local `codex app-server`, aggregates local token usage from `~/.codex/state_5.sqlite`, and shows today's Codex work as a compact desktop board.
+[English](README.en.md)
 
-![codexU desktop widget screenshot](docs/screenshot.png)
+codexU 是一个本地 macOS 桌面用量小组件。它优先通过官方本地 `codex app-server` 读取账户、额度窗口和 usage 信息，再从 `~/.codex/state_5.sqlite` 聚合本机线程 token 用量，并用看板样式展示今天的 Codex 任务状态。
 
-## Features
+![codexU 桌面小组件截图](docs/screenshot.png)
 
-- Shows remaining Codex quota for the 5-hour and 7-day windows, including reset times.
-- Summarizes local token usage for today, the last 7 days, and lifetime totals.
-- Displays a 7-day usage trend for quick daily comparison.
-- Builds a daily task board from local Codex threads and enabled Codex automations.
-- Groups work into active, pending, scheduled, and done columns.
-- Stays on the desktop layer by default, with one-key foreground toggle.
-- Runs locally. The widget reads local Codex files and local Codex app-server responses; it does not upload usage data to a third-party service.
+## 功能
 
-## Keyboard Shortcuts
+- 展示 Codex 5 小时和 7 天额度窗口的剩余比例、已用比例和重置时间。
+- 汇总本机今日、近 7 天和累计 token 用量。
+- 显示近 7 天使用趋势，方便快速对比每天的使用量。
+- 从本机 Codex 线程和启用中的 Codex automations 生成今日任务看板。
+- 按进行中、待处理、定时、完成四类组织任务。
+- 默认贴在桌面层，不遮挡普通窗口；需要查看时可以一键唤到前台。
+- 数据只在本机读取。codexU 不上传本地 usage、线程或账户数据到第三方服务。
 
-- `Command + U`: toggle the widget between desktop layer and foreground layer.
-- Menu bar gauge icon: same toggle as `Command + U`.
-- Refresh button: immediately refresh quota, token usage, trend, and task board.
-- Close button: quit the widget.
-- Drag anywhere on the widget background to reposition it.
+## 快捷键和操作
 
-## First Install: Privacy & Security
+- `Command + U`：在桌面层和前台层之间切换小组件。
+- 菜单栏仪表图标：点击后执行和 `Command + U` 相同的切换操作。
+- 右上角刷新按钮：立即刷新额度、token 统计、趋势图和任务看板。
+- 右上角关闭按钮：退出 codexU。
+- 拖动小组件背景：移动小组件位置。
 
-codexU is distributed outside the Mac App Store. On first launch, macOS may block it until you manually allow it:
+## 首次安装：隐私与安全
 
-1. Open `codexU.app` once. If macOS says it cannot be opened, cancel the dialog.
-2. Open **System Settings > Privacy & Security**.
-3. In the **Security** section, click **Open Anyway** for `codexU.app`.
-4. Confirm with Touch ID or your password, then click **Open**.
+codexU 目前通过 GitHub Release 的 DMG 安装包分发，不经过 Mac App Store。第一次打开时，macOS 可能会拦截，需要手动允许：
 
-You can also right-click `codexU.app` in Finder and choose **Open**, then confirm the same security prompt.
+1. 打开 `codexU.app` 一次。如果系统提示无法打开，先取消弹窗。
+2. 打开 **系统设置 > 隐私与安全性**。
+3. 在 **安全性** 区域找到 `codexU.app`，点击 **仍要打开**。
+4. 使用 Touch ID 或密码确认，然后点击 **打开**。
 
-codexU needs access to local Codex data under `~/.codex/`. If macOS asks for file or folder access, allow it so the widget can read local usage, threads, and automation metadata.
+也可以在 Finder 中右键点击 `codexU.app`，选择 **打开**，再确认系统安全提示。
 
-## Requirements
+codexU 需要读取本机 `~/.codex/` 下的 Codex 数据。如果 macOS 弹出文件或文件夹访问授权，请允许访问，否则小组件无法读取本机 usage、线程和自动化任务信息。
 
-- macOS 14 or later.
-- A local Codex installation.
-- A signed-in Codex account for quota data.
-- Codex must have been used at least once so `~/.codex/state_5.sqlite` exists.
-- Xcode Command Line Tools for building from source.
+## 安装
 
-## Build From Source
+从 GitHub Release 下载最新的 `codexU-<version>-mac-arm64.dmg`：
+
+1. 打开 DMG。
+2. 将 `codexU.app` 拖到 `Applications` 文件夹。
+3. 从 `Applications` 打开 codexU。
+4. 按上面的 **首次安装：隐私与安全** 步骤完成手动放行。
+
+## 运行要求
+
+- macOS 14 或更新版本。
+- 本机已安装 Codex。
+- 已登录 Codex 账户，额度信息才会显示。
+- Codex 至少使用过一次，以便生成 `~/.codex/state_5.sqlite`。
+- 从源码构建时需要 Xcode Command Line Tools。
+
+## 从源码构建
 
 ```sh
 make build
 ```
 
-Run the app:
+运行：
 
 ```sh
 make run
 ```
 
-Install to `/Applications`:
+安装到 `/Applications`：
 
 ```sh
 make install
 ```
 
-Inspect the data source output:
+检查本机数据源输出：
 
 ```sh
 make probe
 ```
 
-## Package A DMG
+## 打包 DMG
 
 ```sh
 make release
 ```
 
-Release artifacts are written to `dist/`, for example:
+产物会写入 `dist/`，例如：
 
 ```text
 dist/codexU-0.1.2-mac-arm64.dmg
 dist/codexU-0.1.2-mac-arm64.dmg.sha256
 ```
 
-For Developer ID signing and notarization, see [DISTRIBUTION.md](DISTRIBUTION.md).
+Developer ID 签名和 Apple notarization 流程见 [DISTRIBUTION.md](DISTRIBUTION.md)。
 
-## Data Sources
+## 数据来源
 
-- Account and quota: `codex app-server` JSON-RPC methods `account/read`, `account/rateLimits/read`, and `account/usage/read`.
-- Local token usage: `~/.codex/state_5.sqlite`.
-- Today's board: unarchived and archived Codex threads in the local SQLite database.
-- Scheduled tasks: enabled automation metadata under `~/.codex/automations/**/automation.toml`.
+- 账户与额度：`codex app-server` 的 `account/read`、`account/rateLimits/read`、`account/usage/read`。
+- 本机 token 用量：`~/.codex/state_5.sqlite`。
+- 今日任务看板：本机 SQLite 中未归档和今日归档的 Codex 线程。
+- 定时任务：`~/.codex/automations/**/automation.toml` 中启用的 automation 元数据。
 
-Current Codex quota APIs expose rolling-window percentages and reset times, not absolute account quota sizes. See [RESEARCH.md](RESEARCH.md) for the data model and fallback behavior.
+当前 Codex 额度 API 暴露的是滚动窗口百分比和重置时间，不暴露绝对配额数量。更完整的数据口径和回退策略见 [RESEARCH.md](RESEARCH.md)。
 
 ## License
 
