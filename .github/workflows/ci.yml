@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS build
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Run CI checks
+        run: make ci
+
+  ubuntu:
+    name: Ubuntu build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show Python
+        run: python3 --version
+
+      - name: Run Ubuntu checks
+        run: make ci-ubuntu
+
+  windows:
+    name: Windows build
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Run Windows checks
+        shell: pwsh
+        run: .\Platforms\Windows\scripts\verify.ps1
+
+  repository-policy:
+    name: Repository policy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate repository contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f Package.swift
+          test -f README.md
+          test -f README.en.md
+          test -f LICENSE
+          test -f CONTRIBUTING.md
+          test -f SECURITY.md
+          test -f SUPPORT.md
+          test -f CODE_OF_CONDUCT.md
+          test -f docs/REPOSITORY_STRUCTURE.md
+          test -f docs/PLATFORM_STRATEGY.md
+          test -f Platforms/Ubuntu/README.md
+          test -f Platforms/Ubuntu/scripts/verify.sh
+          test -f Platforms/Ubuntu/scripts/build-deb.sh
+          test -f Platforms/Windows/README.md
+          test -f Platforms/Windows/scripts/verify.ps1
+          test -f Platforms/Windows/scripts/package-zip.ps1
+          test -f .github/pull_request_template.md
+          test -f .github/ISSUE_TEMPLATE/bug_report.md
+          test -f .github/ISSUE_TEMPLATE/feature_request.md
+          test -f .github/dependabot.yml

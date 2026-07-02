@@ -9,6 +9,13 @@ assignees: ""
 ## Problem
 
 
+## Target platform
+
+- [ ] macOS
+- [ ] Ubuntu/Linux
+- [ ] Windows
+- [ ] Repository metadata, CI, or release packaging
+
 ## Proposed solution
 
 

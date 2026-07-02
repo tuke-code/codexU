@@ -14,9 +14,11 @@ assignees: ""
 
 ## Environment
 
-- macOS:
+- Operating system:
+- Architecture:
 - codexU version:
 - Codex installed and signed in: yes/no
+- Install source: GitHub Release/source build/other
 
 ## Steps to reproduce
 

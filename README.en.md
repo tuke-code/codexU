@@ -1,6 +1,9 @@
 # codexU
 
-codexU is a macOS desktop widget for tracking OpenAI Codex / ChatGPT Codex quota, token usage, and today's task status. It keeps the information you check most on the desktop, so you can quickly see remaining quota, reset times, and daily work progress.
+[![CI](https://github.com/shanggqm/codexU/actions/workflows/ci.yml/badge.svg)](https://github.com/shanggqm/codexU/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+codexU is a native desktop widget project for tracking OpenAI Codex / ChatGPT Codex quota, token usage, and today's task status. This repository now contains isolated native implementations for macOS, Ubuntu Desktop, and Windows.
 
 ![codexU desktop widget screenshot](docs/screenshot-0.2.0.png)
 
@@ -21,6 +24,17 @@ codexU is a macOS desktop widget for tracking OpenAI Codex / ChatGPT Codex quota
 - Supports Chinese and English UI text. The default language follows the system time zone, and the top `中 | EN` switch can override it.
 - Supports system, light, and dark appearance modes. The default follows macOS, and the top appearance switch can override it.
 - Reads data locally and does not upload usage, threads, or account data to a third-party service.
+
+## Platform Support
+
+| Platform | Status | Notes |
+| --- | --- | --- |
+| macOS 14+ | Supported | SwiftUI/AppKit, distributed as DMG. |
+| Ubuntu Desktop 24.04+ | Supported | GTK4/PyGObject, distributed as `.deb`; GNOME Wayland does not expose a true desktop layer or global hotkeys. |
+| Windows 10 1903+ / Windows 11 | Supported | .NET 8 WPF, distributed as zip; tray and topmost mode stand in for the macOS desktop layer. |
+
+See [docs/PLATFORM_STRATEGY.md](docs/PLATFORM_STRATEGY.md) for the multi-platform plan and [docs/REPOSITORY_STRUCTURE.md](docs/REPOSITORY_STRUCTURE.md) for repository layout rules.
+See [Platforms/Ubuntu/README.md](Platforms/Ubuntu/README.md) for Ubuntu and [Platforms/Windows/README.md](Platforms/Windows/README.md) for Windows.
 
 ## Keyboard Shortcuts
 
@@ -55,6 +69,12 @@ codexU needs access to local Codex data under `~/.codex/`. If macOS asks for fil
 
 ## Build From Source
 
+Validate SwiftPM package metadata:
+
+```sh
+swift package dump-package
+```
+
 ```sh
 make build
 ```
@@ -75,6 +95,28 @@ Inspect the data source output:
 
 ```sh
 make probe
+```
+
+Run repository-level CI checks:
+
+```sh
+make ci
+```
+
+Ubuntu native app:
+
+```sh
+cd Platforms/Ubuntu
+./scripts/verify.sh
+python3 -m codexu_ubuntu
+```
+
+Windows native app:
+
+```powershell
+cd Platforms\Windows
+.\scripts\verify.ps1
+dotnet run --project .\CodexU.Windows\CodexU.Windows.csproj
 ```
 
 ## Package A DMG
@@ -101,6 +143,8 @@ dist/codexU-0.2.0-mac-x86_64.dmg.sha256
 ```
 
 For Developer ID signing and notarization, see [DISTRIBUTION.md](DISTRIBUTION.md).
+
+Ubuntu `.deb` and Windows zip packaging commands are documented in each platform README. The GitHub Release artifact workflow builds macOS DMGs, the Ubuntu DEB, and the Windows ZIP.
 
 ## Data Sources
 

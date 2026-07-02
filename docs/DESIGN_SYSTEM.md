@@ -237,7 +237,7 @@ Reduce Transparency 开启时，`surface.window` 和 `surface.card` 必须提高
 
 ### 1. 建立统一 Palette
 
-`main.swift` 必须通过 `WidgetPalette` 建立集中 token，而不是继续增加组件内散色：
+`Sources/CodexUsageWidget/` 中的界面代码必须通过 `WidgetPalette` 建立集中 token，而不是继续增加组件内散色：
 
 ```swift
 private enum WidgetPalette {

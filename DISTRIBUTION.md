@@ -1,12 +1,18 @@
 # codexU Distribution
 
-This app is distributed outside the Mac App Store as a downloadable DMG.
+codexU is distributed outside app stores as native desktop artifacts:
+
+- macOS: DMG.
+- Ubuntu Desktop: `.deb`.
+- Windows: zip.
 
 ## Supported targets
 
 - macOS 14 or later.
 - Apple Silicon Macs with the `arm64` DMG.
 - Intel Macs with the `x86_64` DMG.
+- Ubuntu Desktop 24.04 or later with the GTK4 `.deb`.
+- Windows 10 1903 or later, and Windows 11, with the Windows zip artifact.
 - `make release` builds the current host architecture by default. Use the explicit architecture targets below when preparing GitHub Release artifacts.
 - A local Codex installation and a signed-in Codex account are required for account quota data.
 
@@ -64,6 +70,22 @@ make release
 ```
 
 This creates the DMG and a `SHA-256` checksum file next to it.
+
+## GitHub Actions artifacts
+
+The repository includes `.github/workflows/release.yml`. Pushing a tag such as
+`v0.2.0`, or running the workflow manually, builds release artifacts with:
+
+```sh
+make release-all          # macOS DMGs
+make package-ubuntu       # Ubuntu DEB
+.\scripts\package-zip.ps1 # Windows ZIP, from Platforms\Windows
+```
+
+The workflow uploads macOS `dist/*.dmg`, Ubuntu `Platforms/Ubuntu/dist/*.deb`,
+and Windows `Platforms/Windows/artifacts/*.zip` as GitHub Actions artifacts.
+Attach those files to a GitHub Release after signing/notarization requirements
+for the release channel are satisfied.
 
 ## Developer ID signed build
 

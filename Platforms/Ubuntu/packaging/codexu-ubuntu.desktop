@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=codexU
+Comment=Native Ubuntu Codex usage widget
+Exec=codexu-ubuntu
+Icon=codexu
+Terminal=false
+Categories=Utility;Monitor;
+StartupNotify=false

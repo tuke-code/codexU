@@ -6,6 +6,8 @@
 # Build products
 /build/
 /dist/
+Platforms/Ubuntu/dist/
+Platforms/Windows/artifacts/
 *.dSYM/
 
 # Xcode and SwiftPM local state
@@ -24,3 +26,4 @@ xcuserdata/
 *.dmg
 *.pkg
 *.zip
+*.deb

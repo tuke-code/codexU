@@ -1,0 +1,78 @@
+name: Release Artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-dmg:
+    name: macOS DMG
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Build release artifacts
+        run: make release-all
+
+      - name: Upload DMGs
+        uses: actions/upload-artifact@v4
+        with:
+          name: codexU-macos-dmg
+          path: |
+            dist/*.dmg
+            dist/*.sha256
+          if-no-files-found: error
+
+  ubuntu-deb:
+    name: Ubuntu DEB
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build DEB
+        run: make package-ubuntu
+
+      - name: Upload DEB
+        uses: actions/upload-artifact@v4
+        with:
+          name: codexU-ubuntu-deb
+          path: Platforms/Ubuntu/dist/*.deb
+          if-no-files-found: error
+
+  windows-zip:
+    name: Windows ZIP
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build ZIP
+        shell: pwsh
+        run: .\Platforms\Windows\scripts\package-zip.ps1 -SelfContained
+
+      - name: Upload ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: codexU-windows-zip
+          path: Platforms/Windows/artifacts/*.zip
+          if-no-files-found: error

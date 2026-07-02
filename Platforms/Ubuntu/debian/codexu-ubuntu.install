@@ -1,0 +1,3 @@
+codexu_ubuntu usr/lib/codexu-ubuntu
+packaging/codexu-ubuntu.desktop usr/share/applications
+assets/codexu.svg usr/share/icons/hicolor/scalable/apps

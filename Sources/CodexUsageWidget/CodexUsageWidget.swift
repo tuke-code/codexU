@@ -343,6 +343,7 @@ final class UsageStore: ObservableObject {
 
 final class CodexUsageReader {
     private let fileManager = FileManager.default
+    private let codexLocations = CodexDataLocations.current()
     private static var sessionUsageCache: [String: SessionUsageCacheEntry] = [:]
 
     func load() -> UsageSnapshot {
@@ -614,10 +615,7 @@ final class CodexUsageReader {
     }
 
     private func readLocalUsage(messages: inout [String]) -> LocalUsage? {
-        guard let dbPath = firstExistingPath([
-            NSHomeDirectory() + "/.codex/state_5.sqlite",
-            NSHomeDirectory() + "/.codex/sqlite/state_5.sqlite"
-        ]) else {
+        guard let dbPath = firstExistingPath(codexLocations.stateDatabaseCandidates) else {
             messages.append("未找到 Codex state_5.sqlite")
             return nil
         }
@@ -1013,10 +1011,7 @@ final class CodexUsageReader {
         var pendingItems: [TaskItem] = []
         var doneItems: [TaskItem] = []
 
-        if let dbPath = firstExistingPath([
-            NSHomeDirectory() + "/.codex/state_5.sqlite",
-            NSHomeDirectory() + "/.codex/sqlite/state_5.sqlite"
-        ]), let sqlitePath = firstExistingPath([
+        if let dbPath = firstExistingPath(codexLocations.stateDatabaseCandidates), let sqlitePath = firstExistingPath([
             "/usr/bin/sqlite3",
             "/opt/homebrew/bin/sqlite3",
             "/opt/homebrew/share/android-commandlinetools/platform-tools/sqlite3"
@@ -1111,7 +1106,7 @@ final class CodexUsageReader {
     }
 
     private func readAutomationTasks() -> [TaskItem] {
-        let root = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex/automations")
+        let root = codexLocations.automationsDirectory
         guard let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: nil) else {
             return []
         }

@@ -1,0 +1,15 @@
+* text=auto eol=lf
+
+*.swift text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+Makefile text eol=lf
+
+*.icns binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.dmg binary
+*.deb binary
+*.pkg binary
+*.zip binary

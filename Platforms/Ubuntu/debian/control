@@ -1,0 +1,13 @@
+Source: codexu-ubuntu
+Section: utils
+Priority: optional
+Maintainer: codexU Maintainers <maintainers@example.invalid>
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: codexu-ubuntu
+Architecture: all
+Depends: python3, python3-gi, gir1.2-gtk-4.0
+Description: Native Ubuntu desktop widget for Codex usage
+ codexU Ubuntu is a native GTK4/PyGObject desktop widget that reads local
+ Codex usage data, quota data, token metrics, and task board information.
