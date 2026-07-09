@@ -2473,6 +2473,9 @@ final class AppSettings: ObservableObject {
     private static let keepMainWindowOnTopKey = "codexU.keepMainWindowOnTop"
     private static let keepRunningWhenMainWindowClosedKey = "codexU.keepRunningWhenMainWindowClosed"
     private static let visibleRuntimeScopesKey = "codexU.visibleRuntimeScopes"
+    private static let automaticUpdateChecksEnabledKey = "codexU.update.autoCheckEnabled"
+    private static let includePrereleaseUpdatesKey = "codexU.update.includePrereleases"
+    private static let skippedUpdateVersionKey = "codexU.update.skippedVersion"
 
     private let defaults: UserDefaults
 
@@ -2501,6 +2504,28 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var automaticUpdateChecksEnabled: Bool {
+        didSet {
+            defaults.set(automaticUpdateChecksEnabled, forKey: Self.automaticUpdateChecksEnabledKey)
+        }
+    }
+
+    @Published var includePrereleaseUpdates: Bool {
+        didSet {
+            defaults.set(includePrereleaseUpdates, forKey: Self.includePrereleaseUpdatesKey)
+        }
+    }
+
+    @Published private(set) var skippedUpdateVersion: String? {
+        didSet {
+            if let skippedUpdateVersion {
+                defaults.set(skippedUpdateVersion, forKey: Self.skippedUpdateVersionKey)
+            } else {
+                defaults.removeObject(forKey: Self.skippedUpdateVersionKey)
+            }
+        }
+    }
+
     @Published private(set) var visibleRuntimeScopes: [RuntimeScope] {
         didSet {
             defaults.set(visibleRuntimeScopes.map(\.runtimeId), forKey: Self.visibleRuntimeScopesKey)
@@ -2517,6 +2542,17 @@ final class AppSettings: ObservableObject {
         } else {
             keepRunningWhenMainWindowClosed = defaults.bool(forKey: Self.keepRunningWhenMainWindowClosedKey)
         }
+        if defaults.object(forKey: Self.automaticUpdateChecksEnabledKey) == nil {
+            automaticUpdateChecksEnabled = true
+        } else {
+            automaticUpdateChecksEnabled = defaults.bool(forKey: Self.automaticUpdateChecksEnabledKey)
+        }
+        if defaults.object(forKey: Self.includePrereleaseUpdatesKey) == nil {
+            includePrereleaseUpdates = AppVersion(AppVersion.current())?.isPrerelease ?? false
+        } else {
+            includePrereleaseUpdates = defaults.bool(forKey: Self.includePrereleaseUpdatesKey)
+        }
+        skippedUpdateVersion = defaults.string(forKey: Self.skippedUpdateVersionKey)
         visibleRuntimeScopes = Self.storedVisibleRuntimeScopes(defaults: defaults)
     }
 
@@ -2548,6 +2584,14 @@ final class AppSettings: ObservableObject {
 
     private static func orderedRuntimeScopes(_ scopes: Set<RuntimeScope>) -> [RuntimeScope] {
         RuntimeScope.allCases.filter { scopes.contains($0) }
+    }
+
+    func skipUpdateVersion(_ version: String) {
+        skippedUpdateVersion = version
+    }
+
+    func clearSkippedUpdateVersion() {
+        skippedUpdateVersion = nil
     }
 }
 
@@ -6534,6 +6578,7 @@ final class MainAppWindow: NSWindow {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate {
     private let store = UsageStore()
     private let settings = AppSettings()
+    private lazy var updateStore = AppUpdateStore(settings: settings)
     private var window: MainAppWindow?
     private var settingsWindow: NSWindow?
     private var titlebarToolbarController: NSTitlebarAccessoryViewController?
@@ -6558,6 +6603,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         registerGlobalHotKey()
         store.updateVisibleRuntimeScopes(settings.visibleRuntimeScopes)
         store.start()
+        updateStore.startAutomaticCheck()
     }
 
     private func createMainWindow() {
