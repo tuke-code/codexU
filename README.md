@@ -1,5 +1,8 @@
 # codexU
 
+> [!IMPORTANT]
+> **建议升级到 v1.0.1 或更高版本。** Codex 与 ChatGPT 合并升级后，macOS 应用由 `Codex.app` 更名为 `ChatGPT.app`。旧版 codexU 仍按旧路径查找 Codex，可能导致额度和用量读取失败；v1.0.1 已兼容新应用名称，并保留旧版路径与标准 CLI 回退。[下载最新版本](https://github.com/shanggqm/codexU/releases/latest)。
+
 [English](README.en.md)
 
 codexU 是一个 macOS 菜单栏与桌面应用，用来查看 OpenAI Codex / ChatGPT Codex 和 Claude Code 的额度窗口、token 用量和今日任务状态。它把常用信息放在菜单栏和主窗口里，帮助你快速判断剩余额度、重置时间和当天工作进展。
