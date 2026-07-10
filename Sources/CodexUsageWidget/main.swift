@@ -7013,7 +7013,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     private var globalHotKeyRef: EventHotKeyRef?
     private var globalHotKeyHandler: EventHandlerRef?
     private var cancellables = Set<AnyCancellable>()
-    private let statusItemUsageSize = NSSize(width: 116, height: 22)
+    private let statusItemPresentationBuilder = StatusItemPresentationBuilder()
+    private let statusItemRenderer = StatusItemRenderer()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -7265,7 +7266,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.applyMainWindowLevel()
-                self?.updateStatusItemTooltip()
             }
             .store(in: &cancellables)
 
@@ -7274,6 +7274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             .sink { [weak self] language in
                 self?.settingsWindow?.title = language.text("设置", "Settings")
                 self?.setupMainMenu()
+                self?.updateStatusItem()
             }
             .store(in: &cancellables)
 
@@ -7286,8 +7287,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
                     width: 380,
                     height: runtimeStatusPopoverHeight(for: scopes.count)
                 )
-                self.updateStatusItemTooltip()
                 self.updateStatusItem()
+            }
+            .store(in: &cancellables)
+
+        settings.$statusItemPreferences
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateStatusItem()
             }
             .store(in: &cancellables)
 
@@ -7417,7 +7424,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     }
 
     private func setupStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: statusItemUsageSize.width + 8)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
 
         guard let button = item.button else { return }
@@ -7448,186 +7455,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     private func updateStatusItem() {
         guard let button = statusItem?.button else { return }
-        statusItem?.length = statusItemUsageSize.width + 8
-        button.image = makeStatusItemUsageImage()
-        updateStatusItemTooltip()
-    }
-
-    private func updateStatusItemTooltip() {
-        guard let button = statusItem?.button else { return }
-        let summary = selectedRuntimeSummary()
-        let quotaText = "\(summary?.displayName ?? store.selectedRuntimeScope.displayName) · 5h \(statusItemPercentText(summary?.fiveHourRemainingPercent)) · 7d \(statusItemPercentText(summary?.sevenDayRemainingPercent))"
-        button.toolTip = settings.keepMainWindowOnTop
-            ? "codexU：主窗口已置顶，点击查看 Runtime 用量菜单，快捷键 ⌘U"
-            : "codexU：已用 \(quotaText)，点击查看 Runtime 用量菜单，快捷键 ⌘U"
+        let presentation = currentStatusItemPresentation()
+        statusItem?.length = presentation.itemLength
+        button.image = statusItemRenderer.render(presentation)
+        button.toolTip = presentation.tooltip
+        button.setAccessibilityLabel("codexU")
+        button.setAccessibilityValue(presentation.accessibilityValue)
     }
 
     private func selectedRuntimeSummary() -> RuntimeMenuSummary? {
         store.runtimeSnapshot(for: store.selectedRuntimeScope)?.summary
     }
 
-    private func makeStatusItemUsageImage() -> NSImage {
-        let summary = selectedRuntimeSummary()
-        let image = NSImage(size: statusItemUsageSize)
-        image.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .high
-
-        let rect = NSRect(origin: .zero, size: statusItemUsageSize)
-        NSColor.black.withAlphaComponent(0.24).setFill()
-        NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: 11, yRadius: 11).fill()
-
-        drawStatusItemRuntimeLogo(summary?.scope ?? store.selectedRuntimeScope)
-        drawStatusItemQuotaRow(
-            label: "5h",
-            usedPercent: statusItemUsedPercent(summary?.fiveHourRemainingPercent),
-            resetText: statusItemResetCountdown(summary?.fiveHourResetsAt),
-            y: 11.3
+    private func currentStatusItemPresentation() -> StatusItemPresentation {
+        let source = selectedRuntimeSummary().map(StatusItemSourceSnapshot.init(summary:))
+            ?? StatusItemSourceSnapshot.unavailable(runtime: store.selectedRuntimeScope)
+        return statusItemPresentationBuilder.build(
+            source: source,
+            preferences: settings.statusItemPreferences,
+            language: settings.language
         )
-        drawStatusItemQuotaRow(
-            label: "7d",
-            usedPercent: statusItemUsedPercent(summary?.sevenDayRemainingPercent),
-            resetText: statusItemResetCountdown(summary?.sevenDayResetsAt),
-            y: 1.2
-        )
-
-        image.unlockFocus()
-        image.isTemplate = false
-        return image
-    }
-
-    private func drawStatusItemRuntimeLogo(_ scope: RuntimeScope) {
-        let rect = NSRect(x: 5, y: 4, width: 14, height: 14)
-        if let image = statusItemRuntimeLogo(for: scope) {
-            image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
-            return
-        }
-
-        drawStatusItemText(
-            scope == .codex ? "C" : "A",
-            in: NSRect(x: 5, y: 4.2, width: 14, height: 12),
-            font: .systemFont(ofSize: 9, weight: .bold),
-            color: .white,
-            alignment: .center
-        )
-    }
-
-    private func drawStatusItemQuotaRow(label: String, usedPercent: Double?, resetText: String, y: CGFloat) {
-        let labelColor = NSColor.white.withAlphaComponent(0.92)
-        let valueColor = usedPercent == nil ? NSColor.white.withAlphaComponent(0.48) : labelColor
-        let trackColor = NSColor.white.withAlphaComponent(0.22)
-        let fillColor = statusItemProgressColor(for: usedPercent)
-
-        drawStatusItemText(
-            label,
-            in: NSRect(x: 22, y: y - 1.0, width: 17, height: 11),
-            font: .monospacedDigitSystemFont(ofSize: 8.2, weight: .semibold),
-            color: labelColor,
-            alignment: .right
-        )
-
-        let barRect = NSRect(x: 45, y: y + 2.2, width: 23, height: 4.0)
-        trackColor.setFill()
-        NSBezierPath(roundedRect: barRect, xRadius: 2, yRadius: 2).fill()
-        if let usedPercent {
-            let progress = max(0, min(1, usedPercent / 100))
-            if progress > 0 {
-                let fillWidth = max(1.2, barRect.width * CGFloat(progress))
-                let fillRect = NSRect(x: barRect.minX, y: barRect.minY, width: fillWidth, height: barRect.height)
-                fillColor.setFill()
-                NSBezierPath(roundedRect: fillRect, xRadius: 2, yRadius: 2).fill()
-            }
-        }
-
-        drawStatusItemText(
-            statusItemPercentTextFromUsed(usedPercent),
-            in: NSRect(x: 70, y: y - 1.0, width: 24, height: 11),
-            font: .monospacedDigitSystemFont(ofSize: 8.2, weight: .semibold),
-            color: valueColor,
-            alignment: .right
-        )
-        drawStatusItemText(
-            resetText,
-            in: NSRect(x: 98, y: y - 1.0, width: 15, height: 11),
-            font: .monospacedDigitSystemFont(ofSize: 7.7, weight: .medium),
-            color: NSColor.white.withAlphaComponent(0.64),
-            alignment: .left
-        )
-    }
-
-    private func drawStatusItemText(
-        _ text: String,
-        in rect: NSRect,
-        font: NSFont,
-        color: NSColor,
-        alignment: NSTextAlignment
-    ) {
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.alignment = alignment
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: color,
-            .paragraphStyle: paragraphStyle
-        ]
-        text.draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes)
-    }
-
-    private func statusItemUsedPercent(_ remainingPercent: Double?) -> Double? {
-        guard let remainingPercent else { return nil }
-        return max(0, min(100, 100 - remainingPercent))
-    }
-
-    private func statusItemPercentText(_ remainingPercent: Double?) -> String {
-        statusItemPercentTextFromUsed(statusItemUsedPercent(remainingPercent))
-    }
-
-    private func statusItemPercentTextFromUsed(_ usedPercent: Double?) -> String {
-        guard let usedPercent else { return "--" }
-        return "\(Int(usedPercent.rounded()))%"
-    }
-
-    private func statusItemProgressColor(for usedPercent: Double?) -> NSColor {
-        guard let usedPercent else {
-            return NSColor.white.withAlphaComponent(0.30)
-        }
-        switch usedPercent {
-        case ..<50:
-            return NSColor.systemGreen
-        case ..<75:
-            return NSColor.systemYellow
-        case ..<90:
-            return NSColor.systemOrange
-        default:
-            return NSColor.systemRed
-        }
-    }
-
-    private func statusItemResetCountdown(_ date: Date?) -> String {
-        guard let date else { return "--" }
-        let seconds = max(0, Int(date.timeIntervalSinceNow.rounded(.down)))
-        let days = seconds / 86_400
-        let hours = (seconds % 86_400) / 3_600
-        let minutes = (seconds % 3_600) / 60
-        if days > 0 {
-            return "\(days)d"
-        }
-        if hours > 0 {
-            return "\(hours)h"
-        }
-        return "\(minutes)m"
-    }
-
-    private func statusItemRuntimeLogo(for scope: RuntimeScope) -> NSImage? {
-        let name: String
-        switch scope {
-        case .codex:
-            name = "codex-color"
-        case .claudeCode:
-            name = "claudecode-color"
-        }
-        guard let url = Bundle.main.url(forResource: name, withExtension: "png") else {
-            return nil
-        }
-        return NSImage(contentsOf: url)
     }
 
     private func registerGlobalHotKey() {
