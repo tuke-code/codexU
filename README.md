@@ -9,7 +9,7 @@ codexU 是一个 macOS 菜单栏与桌面应用，用来查看 OpenAI Codex / Ch
 
 ## 界面截图
 
-![codexU 菜单栏 Runtime 浮窗](docs/screenshot-v1.0.0-beta-menu-popover.png)
+![codexU v1.0.2 状态栏定制与主界面](docs/screenshot-v1.0.2-status-bar-customization.png)
 
 ![codexU 今日任务视图](docs/screenshot-v0.3.0-today.png)
 
@@ -152,10 +152,10 @@ make release-all
 产物会写入 `dist/`，例如：
 
 ```text
-dist/codexU-1.0.1-mac-arm64.dmg
-dist/codexU-1.0.1-mac-arm64.dmg.sha256
-dist/codexU-1.0.1-mac-x86_64.dmg
-dist/codexU-1.0.1-mac-x86_64.dmg.sha256
+dist/codexU-1.0.2-mac-arm64.dmg
+dist/codexU-1.0.2-mac-arm64.dmg.sha256
+dist/codexU-1.0.2-mac-x86_64.dmg
+dist/codexU-1.0.2-mac-x86_64.dmg.sha256
 ```
 
 Developer ID 签名和 Apple notarization 流程见 [DISTRIBUTION.md](DISTRIBUTION.md)。
