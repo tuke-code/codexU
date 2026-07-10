@@ -4401,8 +4401,7 @@ struct WoolProgressCard: View {
 
             QuotaValueProgressBar(
                 currentValue: cost,
-                maxValue: maxValue,
-                accent: accent
+                maxValue: maxValue
             )
             .frame(height: 18)
 
@@ -4435,7 +4434,6 @@ struct WoolProgressCard: View {
 struct QuotaValueProgressBar: View {
     let currentValue: Double
     let maxValue: Double
-    let accent: Color
 
     var body: some View {
         GeometryReader { geometry in
@@ -4449,7 +4447,17 @@ struct QuotaValueProgressBar: View {
                     .frame(maxHeight: .infinity, alignment: .center)
 
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(accent)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                WidgetPalette.brandPrimaryLight,
+                                WidgetPalette.brandPrimary,
+                                WidgetPalette.brandSecondaryStrong
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
                     .frame(width: currentValue > 0 ? max(5, progressWidth) : 0, height: 10)
                     .frame(maxHeight: .infinity, alignment: .center)
 
@@ -6063,12 +6071,14 @@ enum WidgetPalette {
     static let brandPrimaryStrongRGB = RingRGBColor(red: 0.122, green: 0.349, blue: 0.929) // #1F59ED
     static let brandPrimaryLightRGB = RingRGBColor(red: 0.482, green: 0.627, blue: 1.000) // #7BA0FF
     static let brandSecondaryRGB = RingRGBColor(red: 0.545, green: 0.427, blue: 1.000) // #8B6DFF
+    static let brandSecondaryStrongRGB = RingRGBColor(red: 0.427, green: 0.271, blue: 0.910) // #6D45E8
     static let brandHighlightRGB = RingRGBColor(red: 0.855, green: 0.639, blue: 0.980) // #DAA3FA
 
     static let brandPrimary = brandPrimaryRGB.color
     static let brandPrimaryStrong = brandPrimaryStrongRGB.color
     static let brandPrimaryLight = brandPrimaryLightRGB.color
     static let brandSecondary = brandSecondaryRGB.color
+    static let brandSecondaryStrong = brandSecondaryStrongRGB.color
     static let brandHighlight = brandHighlightRGB.color
 
     static let statusSuccess = Color(red: 0.188, green: 0.820, blue: 0.345) // #30D158
