@@ -112,6 +112,7 @@ struct RuntimeStatusMenuView: View {
                     .frame(width: 26, height: 24)
             }
             .buttonStyle(.plain)
+            .disabled(store.isRefreshing)
             .help(language.text("刷新", "Refresh"))
         }
     }

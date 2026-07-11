@@ -556,7 +556,7 @@ final class UsageStore: ObservableObject {
         ) { [weak self] _ in
             guard let self, self.statisticsPreference.selection == .system else { return }
             self.scheduleStatisticsRollover()
-            self.refresh()
+            self.refresh(queueIfBusy: true)
         }
         scheduleStatisticsRollover()
         fullTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
@@ -578,14 +578,16 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    func refresh() {
+    func refresh(queueIfBusy: Bool = false) {
+        guard !isRefreshing else {
+            if queueIfBusy {
+                hasPendingRefresh = true
+            }
+            return
+        }
         refreshGeneration &+= 1
         let generation = refreshGeneration
         let preference = statisticsPreference
-        guard !isRefreshing else {
-            hasPendingRefresh = true
-            return
-        }
         isRefreshing = true
 
         DispatchQueue.global(qos: .utility).async {
@@ -640,7 +642,7 @@ final class UsageStore: ObservableObject {
             finishStatisticsTimeZoneSwitch(cached: true)
             return
         }
-        refresh()
+        refresh(queueIfBusy: true)
     }
 
     private func statisticsCacheKey(for preference: StatisticsTimeZonePreference) -> String {
@@ -692,7 +694,7 @@ final class UsageStore: ObservableObject {
         guard let nextDay = context.calendar.date(byAdding: .day, value: 1, to: start) else { return }
         statisticsRolloverTimer = Timer(fire: nextDay.addingTimeInterval(1), interval: 0, repeats: false) { [weak self] _ in
             self?.scheduleStatisticsRollover()
-            self?.refresh()
+            self?.refresh(queueIfBusy: true)
         }
         if let statisticsRolloverTimer {
             RunLoop.main.add(statisticsRolloverTimer, forMode: .common)
@@ -3347,6 +3349,7 @@ struct TitlebarToolbarView: View {
                 ) {
                     store.refresh()
                 }
+                .disabled(store.isRefreshing)
 
                 HeaderActionButton(
                     systemName: "gearshape",
