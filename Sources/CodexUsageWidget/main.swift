@@ -3379,8 +3379,8 @@ struct SettingsPanelView: View {
                     SettingsPickerRow(
                         title: language.text("快捷键", "Shortcut"),
                         detail: language.text(
-                            "自定义组合至少需要两个修饰键，并包含 Command 或 Control",
-                            "Custom combinations need two modifiers, including Command or Control"
+                            "默认可使用 ⌘U；自定义需至少两个修饰键，并含 Command 或 Control",
+                            "Default: ⌘U. Custom shortcuts need two modifiers, including Command or Control"
                         )
                     ) {
                         HStack(spacing: 8) {
