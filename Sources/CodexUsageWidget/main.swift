@@ -528,8 +528,12 @@ final class UsageStore: ObservableObject {
     private var statisticsSnapshotCache: [String: StatisticsSnapshotCacheEntry] = [:]
     private var statisticsSnapshotCacheOrder: [String] = []
     private var statisticsFeedbackTimer: Timer?
+    private var hasStarted = false
+    private var isTaskBoardPollingActive = false
     private let statisticsSnapshotCacheLimit = 4
     private let statisticsSnapshotCacheTTL: TimeInterval = 3 * 60
+    private let foregroundTaskBoardRefreshInterval: TimeInterval = 10
+    private let backgroundTaskBoardRefreshInterval: TimeInterval = 60
 
     var runtimeSummaries: [RuntimeMenuSummary] {
         RuntimeScope.allCases.compactMap { scope in
@@ -548,6 +552,7 @@ final class UsageStore: ObservableObject {
     }
 
     func start() {
+        hasStarted = true
         refresh()
         systemTimeZoneObserver = NotificationCenter.default.addObserver(
             forName: .NSSystemTimeZoneDidChange,
@@ -562,12 +567,12 @@ final class UsageStore: ObservableObject {
         fullTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             self?.refresh()
         }
-        taskBoardTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            self?.refreshTaskBoard()
-        }
+        fullTimer?.tolerance = 30
+        scheduleTaskBoardTimer()
     }
 
     func stop() {
+        hasStarted = false
         fullTimer?.invalidate()
         taskBoardTimer?.invalidate()
         statisticsRolloverTimer?.invalidate()
@@ -718,6 +723,28 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    func setTaskBoardPollingActive(_ isActive: Bool) {
+        guard isTaskBoardPollingActive != isActive else { return }
+        isTaskBoardPollingActive = isActive
+        guard hasStarted else { return }
+        scheduleTaskBoardTimer()
+        if isActive {
+            refreshTaskBoard()
+        }
+    }
+
+    private func scheduleTaskBoardTimer() {
+        taskBoardTimer?.invalidate()
+        let interval = isTaskBoardPollingActive
+            ? foregroundTaskBoardRefreshInterval
+            : backgroundTaskBoardRefreshInterval
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.refreshTaskBoard()
+        }
+        timer.tolerance = isTaskBoardPollingActive ? 2 : 12
+        taskBoardTimer = timer
+    }
+
     private func refreshTaskBoard() {
         guard !isRefreshing, !isRefreshingTaskBoard else { return }
         isRefreshingTaskBoard = true
@@ -770,7 +797,9 @@ final class CodexUsageReader {
     private let fileManager = FileManager.default
     private let localAnalyticsCacheVersion = 6
     private let sessionUsageCacheVersion = 4
+    private static let sessionUsageCacheLimit = 1_024
     private static var sessionUsageCache: [String: SessionUsageCacheEntry] = [:]
+    private static var sessionUsageCacheOrder: [String] = []
     private static var persistentSessionUsageCache: [String: SessionUsageCacheEntry]?
     private static var localAnalyticsCache: LocalAnalyticsCacheEntry?
 
@@ -1675,14 +1704,14 @@ final class CodexUsageReader {
         else { return nil }
 
         let modificationDate = attributes[.modificationDate] as? Date
-        if let cached = Self.sessionUsageCache[source.rolloutPath],
+        if let cached = memorySessionUsageCacheEntry(for: source.rolloutPath),
            sameSessionFileIdentity(cached, fileSize: fileSize, modificationDate: modificationDate) {
             return cached
         }
 
         if let cached = persistentSessionUsageCache()[source.rolloutPath],
            sameSessionFileIdentity(cached, fileSize: fileSize, modificationDate: modificationDate) {
-            Self.sessionUsageCache[source.rolloutPath] = cached
+            storeSessionUsageCacheEntry(cached, for: source.rolloutPath)
             return cached
         }
 
@@ -1708,7 +1737,7 @@ final class CodexUsageReader {
                 toolCalls: parsed.toolCalls,
                 skillLoads: parsed.skillLoads
             )
-            Self.sessionUsageCache[source.rolloutPath] = entry
+            storeSessionUsageCacheEntry(entry, for: source.rolloutPath)
             return entry
         }
 
@@ -1776,8 +1805,25 @@ final class CodexUsageReader {
             toolCalls: toolCalls,
             skillLoads: skillLoads
         )
-        Self.sessionUsageCache[source.rolloutPath] = entry
+        storeSessionUsageCacheEntry(entry, for: source.rolloutPath)
         return entry
+    }
+
+    private func memorySessionUsageCacheEntry(for key: String) -> SessionUsageCacheEntry? {
+        guard let entry = Self.sessionUsageCache[key] else { return nil }
+        Self.sessionUsageCacheOrder.removeAll { $0 == key }
+        Self.sessionUsageCacheOrder.append(key)
+        return entry
+    }
+
+    private func storeSessionUsageCacheEntry(_ entry: SessionUsageCacheEntry, for key: String) {
+        Self.sessionUsageCache[key] = entry
+        Self.sessionUsageCacheOrder.removeAll { $0 == key }
+        Self.sessionUsageCacheOrder.append(key)
+        while Self.sessionUsageCacheOrder.count > Self.sessionUsageCacheLimit {
+            let evicted = Self.sessionUsageCacheOrder.removeFirst()
+            Self.sessionUsageCache.removeValue(forKey: evicted)
+        }
     }
 
     private func parseSessionUsageWithGrep(
@@ -2154,8 +2200,9 @@ final class CodexUsageReader {
             return [:]
         }
 
-        Self.persistentSessionUsageCache = diskCache.entries
-        return diskCache.entries
+        let entries = limitedSessionUsageCache(diskCache.entries)
+        Self.persistentSessionUsageCache = entries
+        return entries
     }
 
     private func writePersistentLocalAnalyticsCache(_ entry: LocalAnalyticsCacheEntry?) {
@@ -2172,7 +2219,9 @@ final class CodexUsageReader {
 
     private func writePersistentSessionUsageCache() {
         guard let url = sessionUsageCacheURL() else { return }
-        let mergedEntries = persistentSessionUsageCache().merging(Self.sessionUsageCache) { _, new in new }
+        let mergedEntries = limitedSessionUsageCache(
+            persistentSessionUsageCache().merging(Self.sessionUsageCache) { _, new in new }
+        )
         Self.persistentSessionUsageCache = mergedEntries
 
         do {
@@ -2183,6 +2232,18 @@ final class CodexUsageReader {
         } catch {
             debugLog("failed to write session usage cache: \(error.localizedDescription)")
         }
+    }
+
+    private func limitedSessionUsageCache(
+        _ entries: [String: SessionUsageCacheEntry]
+    ) -> [String: SessionUsageCacheEntry] {
+        guard entries.count > Self.sessionUsageCacheLimit else { return entries }
+        let retained = entries.sorted { lhs, rhs in
+            let lhsDate = lhs.value.modificationDate ?? .distantPast
+            let rhsDate = rhs.value.modificationDate ?? .distantPast
+            return lhsDate == rhsDate ? lhs.key < rhs.key : lhsDate > rhsDate
+        }.prefix(Self.sessionUsageCacheLimit)
+        return Dictionary(uniqueKeysWithValues: retained.map { ($0.key, $0.value) })
     }
 
     private func sameSessionFileIdentity(
@@ -7506,6 +7567,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
         if window.isVisible, !window.isMiniaturized, window.isKeyWindow {
             window.orderOut(nil)
+            updateTaskBoardPollingActivity()
             return
         }
 
@@ -7537,6 +7599,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         return true
     }
 
+    func windowDidMiniaturize(_ notification: Notification) {
+        updateTaskBoardPollingActivity()
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        updateTaskBoardPollingActivity()
+    }
+
     private func showMainWindow() {
         guard let window else { return }
         NSApp.setActivationPolicy(.regular)
@@ -7548,12 +7618,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        updateTaskBoardPollingActivity()
     }
 
     private func hideMainWindowAfterClose() {
         closeStatusPopover()
         window?.orderOut(nil)
         NSApp.setActivationPolicy(.accessory)
+        updateTaskBoardPollingActivity()
     }
 
     private func applyMainWindowLevel() {
@@ -7769,6 +7841,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         )
         statusPopover = popover
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        updateTaskBoardPollingActivity()
         configureStatusPopoverWindow()
         DispatchQueue.main.async { [weak self] in
             self?.configureStatusPopoverWindow()
@@ -7797,12 +7870,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     func popoverDidClose(_ notification: Notification) {
         statusPopover = nil
         removeStatusPopoverEventMonitors()
+        updateTaskBoardPollingActivity()
     }
 
     private func closeStatusPopover() {
         statusPopover?.performClose(nil)
         statusPopover = nil
         removeStatusPopoverEventMonitors()
+        updateTaskBoardPollingActivity()
+    }
+
+    private func updateTaskBoardPollingActivity() {
+        let mainWindowVisible = window?.isVisible == true && window?.isMiniaturized == false
+        let popoverVisible = statusPopover?.isShown == true
+        store.setTaskBoardPollingActive(mainWindowVisible || popoverVisible)
     }
 
     private func installStatusPopoverEventMonitors() {
