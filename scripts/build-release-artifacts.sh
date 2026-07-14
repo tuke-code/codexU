@@ -18,6 +18,8 @@ git diff --check
 make build >/dev/null
 build/codexU.app/Contents/MacOS/codexU --self-test-statistics-time-zone
 build/codexU.app/Contents/MacOS/codexU --self-test-status-item
+build/codexU.app/Contents/MacOS/codexU --self-test-rate-limits
+build/codexU.app/Contents/MacOS/codexU --self-test-particle-animation
 build/codexU.app/Contents/MacOS/codexU --self-test-updates
 ./scripts/test-parsers.sh
 
