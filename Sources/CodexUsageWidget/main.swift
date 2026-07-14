@@ -929,8 +929,8 @@ final class UsageStore: ObservableObject {
 
 final class CodexUsageReader {
     private let fileManager = FileManager.default
-    private let localAnalyticsCacheVersion = 8
-    private let sessionUsageCacheVersion = 5
+    private let localAnalyticsCacheVersion = 9
+    private let sessionUsageCacheVersion = 6
     private static let sessionUsageCacheLimit = 1_024
     private static let persistentSessionUsageCacheWriteInterval: TimeInterval = 15 * 60
     private static var sessionUsageCache: [String: SessionUsageCacheEntry] = [:]
@@ -2183,17 +2183,20 @@ final class CodexUsageReader {
         guard payloadType == "token_count",
               let timestamp = object["timestamp"] as? String,
               let info = payload["info"] as? [String: Any],
-              let totalUsage = info["total_token_usage"] as? [String: Any],
               let date = fractionalFormatter.date(from: timestamp) ?? plainFormatter.date(from: timestamp)
         else { return }
+
+        let cumulativeSample = (info["total_token_usage"] as? [String: Any]).map { usage in
+            tokenCounterSample(from: usage)
+        }
+        let lastUsageSample = (info["last_token_usage"] as? [String: Any]).map { usage in
+            tokenCounterSample(from: usage)
+        }
+        guard cumulativeSample != nil || lastUsageSample != nil else { return }
 
         sawTokenEvent = true
         tokenEventCount += 1
 
-        let cumulativeSample = tokenCounterSample(from: totalUsage)
-        let lastUsageSample = (info["last_token_usage"] as? [String: Any]).map { usage in
-            tokenCounterSample(from: usage)
-        }
         guard let delta = CodexTokenCounterNormalizer.consume(
             cumulative: cumulativeSample,
             lastUsage: lastUsageSample,

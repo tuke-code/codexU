@@ -43,13 +43,16 @@ enum CodexTokenCounterNormalizer {
         guard let previous = state.cumulative else {
             let current = sample.snapshot()
             state.cumulative = current
-            return nonzero(preferredDelta(lastDelta, fallback: current))
+            return nonzero(lastDelta ?? current)
         }
 
         if isConfirmedReset(sample, previous: previous) {
             let current = sample.snapshot()
             state.cumulative = current
-            return nonzero(preferredDelta(lastDelta, fallback: current))
+            // `last_token_usage` is the event-level delta. A cumulative reset
+            // is exactly where it is expected to differ from the new epoch's
+            // whole baseline, so never reject it for that mismatch.
+            return nonzero(lastDelta ?? current)
         }
 
         // Cumulative usage fields are expected to be monotonic. Missing fields,
@@ -68,7 +71,7 @@ enum CodexTokenCounterNormalizer {
         state.cumulative = highWater
 
         guard !fallback.isZero else { return nil }
-        return nonzero(preferredDelta(lastDelta, fallback: fallback))
+        return nonzero(lastDelta ?? fallback)
     }
 
     private static func validatedLastUsage(_ sample: CodexTokenCounterSample?) -> TokenBreakdown? {
@@ -93,28 +96,9 @@ enum CodexTokenCounterNormalizer {
             && input < previous.inputTokens
     }
 
-    private static func preferredDelta(
-        _ lastDelta: TokenBreakdown?,
-        fallback: TokenBreakdown
-    ) -> TokenBreakdown {
-        guard let lastDelta else { return fallback }
-
-        let lastTotal = lastDelta.visibleTotalTokens
-        let fallbackTotal = fallback.visibleTotalTokens
-        let tolerance = max(Int64(16), fallbackTotal / 100)
-        guard absoluteDifference(lastTotal, fallbackTotal) <= tolerance else {
-            return fallback
-        }
-        return lastDelta
-    }
-
     private static func nonzero(_ value: TokenBreakdown?) -> TokenBreakdown? {
         guard let value, !value.isZero else { return nil }
         return value
-    }
-
-    private static func absoluteDifference(_ lhs: Int64, _ rhs: Int64) -> Int64 {
-        lhs >= rhs ? lhs - rhs : rhs - lhs
     }
 }
 
@@ -194,18 +178,55 @@ enum CodexTokenCounterNormalizerSelfTest {
         expect(recoveredAuxiliary?.totalTokens == 13, "normal growth should prefer matching last_token_usage")
 
         let reset = CodexTokenCounterNormalizer.consume(
-            cumulative: sample(input: 8, cached: 4, output: 2, reasoning: 1, total: 10),
+            cumulative: sample(input: 80, cached: 40, output: 20, reasoning: 5, total: 100),
             lastUsage: sample(input: 8, cached: 4, output: 2, reasoning: 1, total: 10),
             state: &state
         )
-        expect(reset?.totalTokens == 10, "confirmed cumulative reset should count the new epoch once")
+        expect(reset?.totalTokens == 10, "confirmed cumulative reset should prefer the event-level delta")
+        expect(reset?.inputTokens == 8, "reset baseline must not replace last_token_usage splits")
 
         let afterReset = CodexTokenCounterNormalizer.consume(
-            cumulative: sample(input: 18, cached: 9, output: 4, reasoning: 1, total: 22),
+            cumulative: sample(input: 90, cached: 45, output: 22, reasoning: 5, total: 112),
             lastUsage: sample(input: 10, cached: 5, output: 2, reasoning: 0, total: 12),
             state: &state
         )
         expect(afterReset?.totalTokens == 12, "events after a confirmed reset should resume normal deltas")
+
+        var repeatedResetState = CodexTokenCounterState()
+        var repeatedResetTotal: Int64 = 0
+        if let initial = CodexTokenCounterNormalizer.consume(
+            cumulative: sample(input: 1_800, cached: 1_500, output: 200, reasoning: 50, total: 2_000),
+            lastUsage: sample(input: 8, cached: 6, output: 2, reasoning: 1, total: 10),
+            state: &repeatedResetState
+        ) {
+            repeatedResetTotal += initial.totalTokens
+        }
+        for _ in 0..<60 {
+            if let resetEvent = CodexTokenCounterNormalizer.consume(
+                cumulative: sample(input: 900, cached: 750, output: 100, reasoning: 25, total: 1_000),
+                lastUsage: sample(input: 8, cached: 6, output: 2, reasoning: 1, total: 10),
+                state: &repeatedResetState
+            ) {
+                repeatedResetTotal += resetEvent.totalTokens
+            }
+            if let growthEvent = CodexTokenCounterNormalizer.consume(
+                cumulative: sample(input: 1_800, cached: 1_500, output: 200, reasoning: 50, total: 2_000),
+                lastUsage: sample(input: 8, cached: 6, output: 2, reasoning: 1, total: 10),
+                state: &repeatedResetState
+            ) {
+                repeatedResetTotal += growthEvent.totalTokens
+            }
+        }
+        expect(repeatedResetTotal == 1_210, "repeated resets must sum event deltas instead of replaying cumulative baselines")
+
+        var lastOnlyState = CodexTokenCounterState()
+        let lastOnly = CodexTokenCounterNormalizer.consume(
+            cumulative: nil,
+            lastUsage: sample(input: 25, cached: 20, output: 3, reasoning: 1, total: 28),
+            state: &lastOnlyState
+        )
+        expect(lastOnly?.totalTokens == 28, "last_token_usage should remain usable without a cumulative snapshot")
+        expect(lastOnly?.uncachedInputTokens == 5, "last-only events should preserve token splits")
 
         var legacyState = CodexTokenCounterState()
         _ = CodexTokenCounterNormalizer.consume(
