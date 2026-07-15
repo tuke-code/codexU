@@ -1,7 +1,7 @@
 # codexU
 
 > [!IMPORTANT]
-> **建议升级到 v1.0.5 或更高版本。** v1.0.5 会按 Codex 实际返回的额度窗口自适应单环/双环和菜单栏布局，保留完整粒子体验但只在窗口置前聚焦时渲染，并进一步减少后台轮询、异常额度响应和 Claude Code 缓存带来的资源与可靠性问题；同时继续兼容 ChatGPT.app、旧版 Codex.app 与标准 CLI 路径。[下载最新版本](https://github.com/shanggqm/codexU/releases/latest)。
+> **建议升级到 v1.1.0 或更高版本。** v1.1.0 新增六套经过审核的内置配色与 Liquid Glass 配色图库、Codex 额度重置次数及到期详情，支持 macOS 13，并强化累计 Token 计数在字段缺失、回退和重置场景下的准确性。[下载最新版本](https://github.com/shanggqm/codexU/releases/latest)。
 
 [产品官网](https://shanggqm.github.io/codexU-site/) · [下载最新版本](https://github.com/shanggqm/codexU/releases/latest) · [English](README.en.md)
 
@@ -28,6 +28,7 @@ codexU 是一个 macOS 菜单栏与桌面应用，用来查看 OpenAI Codex / Ch
 
 ## 功能
 
+- 提供默认、青花瓷、故宫红、千里江山、敦煌飞天和兰亭晨曦六套受控配色，可在独立 Liquid Glass 配色图库中即时预览和切换；社区配色通过仓库审核、许可证检查和 CI 渲染验证后随应用内置，不支持用户侧任意安装。
 - 展示 Codex 5 小时和 7 天额度的剩余比例、已用比例和重置时间；按协议返回的实际窗口时长识别额度类型，并根据可信响应自适应单环/双环、单进度条/双进度条布局。
 - Codex 返回可用额度重置次数时，在主界面额度环下方固定展示总数和最早到期的两条明细；其余信息可悬停查看与用量趋势同款的完整 tip。若服务端只返回总数，会明确提示部分到期时间未提供。字段缺失、次数为 0 或 Claude Code 不支持时不显示。
 - 新增状态栏 Runtime 菜单：点击菜单栏图标后先展示 Codex / Claude Code 卡片、5 小时和 7 日剩余、今日 token 与总 token。
@@ -157,10 +158,10 @@ make release-all
 产物会写入 `dist/`，例如：
 
 ```text
-dist/codexU-1.0.5-mac-arm64.dmg
-dist/codexU-1.0.5-mac-arm64.dmg.sha256
-dist/codexU-1.0.5-mac-x86_64.dmg
-dist/codexU-1.0.5-mac-x86_64.dmg.sha256
+dist/codexU-1.1.0-mac-arm64.dmg
+dist/codexU-1.1.0-mac-arm64.dmg.sha256
+dist/codexU-1.1.0-mac-x86_64.dmg
+dist/codexU-1.1.0-mac-x86_64.dmg.sha256
 ```
 
 Developer ID 签名和 Apple notarization 流程见 [DISTRIBUTION.md](DISTRIBUTION.md)。
