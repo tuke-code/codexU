@@ -12,7 +12,12 @@ struct StatusItemSourceSnapshot: Equatable {
     let fiveHourResetsAt: Date?
     let sevenDayRemainingPercent: Double?
     let sevenDayResetsAt: Date?
+    let sevenDayWindowDurationMins: Int?
     let todayTokens: Int64?
+
+    var secondaryQuotaIsMonthly: Bool {
+        CodexRateLimitNormalizer.isMonthlyDuration(sevenDayWindowDurationMins)
+    }
 
     init(summary: RuntimeMenuSummary) {
         runtime = summary.scope
@@ -21,6 +26,7 @@ struct StatusItemSourceSnapshot: Equatable {
         fiveHourResetsAt = summary.fiveHourResetsAt
         sevenDayRemainingPercent = summary.sevenDayRemainingPercent
         sevenDayResetsAt = summary.sevenDayResetsAt
+        sevenDayWindowDurationMins = summary.sevenDayWindowDurationMins
         todayTokens = summary.todayTokens
     }
 
@@ -32,6 +38,7 @@ struct StatusItemSourceSnapshot: Equatable {
             fiveHourResetsAt: nil,
             sevenDayRemainingPercent: nil,
             sevenDayResetsAt: nil,
+            sevenDayWindowDurationMins: nil,
             todayTokens: nil
         )
     }
@@ -43,6 +50,7 @@ struct StatusItemSourceSnapshot: Equatable {
         fiveHourResetsAt: Date?,
         sevenDayRemainingPercent: Double?,
         sevenDayResetsAt: Date?,
+        sevenDayWindowDurationMins: Int? = nil,
         todayTokens: Int64?
     ) {
         self.runtime = runtime
@@ -51,6 +59,7 @@ struct StatusItemSourceSnapshot: Equatable {
         self.fiveHourResetsAt = fiveHourResetsAt
         self.sevenDayRemainingPercent = sevenDayRemainingPercent
         self.sevenDayResetsAt = sevenDayResetsAt
+        self.sevenDayWindowDurationMins = sevenDayWindowDurationMins
         self.todayTokens = todayTokens
     }
 }
@@ -289,7 +298,7 @@ struct StatusItemPresentationBuilder {
         case .sevenDayQuota:
             return makeQuotaMetric(
                 metric: metric,
-                label: "7d",
+                label: source.secondaryQuotaIsMonthly ? "mo" : "7d",
                 remainingPercent: source.sevenDayRemainingPercent,
                 resetsAt: source.sevenDayResetsAt,
                 paletteRole: .secondary,
@@ -373,7 +382,9 @@ struct StatusItemPresentationBuilder {
                 case .fiveHourQuota:
                     quotaName = language.text("5 小时额度", "5-hour quota")
                 case .sevenDayQuota:
-                    quotaName = language.text("7 天额度", "7-day quota")
+                    quotaName = source.secondaryQuotaIsMonthly
+                        ? language.text("月额度", "monthly quota")
+                        : language.text("7 天额度", "7-day quota")
                 case .todayTokens:
                     quotaName = metric.label
                 }

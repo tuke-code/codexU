@@ -190,6 +190,7 @@ struct RuntimeStatusMenuView: View {
             fiveHourResetsAt: nil,
             sevenDayRemainingPercent: nil,
             sevenDayResetsAt: nil,
+            sevenDayWindowDurationMins: nil,
             todayTokens: nil,
             sourceLabel: language.text("等待本机统计", "Waiting for local records")
         )

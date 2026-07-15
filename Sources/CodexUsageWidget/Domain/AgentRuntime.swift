@@ -63,10 +63,16 @@ struct RuntimeMenuSummary: Identifiable, Equatable {
     let fiveHourResetsAt: Date?
     let sevenDayRemainingPercent: Double?
     let sevenDayResetsAt: Date?
+    /// Duration of the secondary long-period window (7d or monthly).
+    let sevenDayWindowDurationMins: Int?
     let todayTokens: Int64?
     let sourceLabel: String
 
     var id: String { scope.runtimeId }
+
+    var secondaryQuotaIsMonthly: Bool {
+        CodexRateLimitNormalizer.isMonthlyDuration(sevenDayWindowDurationMins)
+    }
 }
 
 struct RuntimeUsageSnapshot: Identifiable, Equatable {
@@ -95,6 +101,7 @@ struct RuntimeUsageSnapshot: Identifiable, Equatable {
             fiveHourResetsAt: snapshot.fiveHourQuota?.resetsAt,
             sevenDayRemainingPercent: snapshot.sevenDayQuota?.remainingPercent,
             sevenDayResetsAt: snapshot.sevenDayQuota?.resetsAt,
+            sevenDayWindowDurationMins: snapshot.sevenDayQuota?.windowDurationMins,
             todayTokens: todayTokens,
             sourceLabel: quotaSourceLabel
         )

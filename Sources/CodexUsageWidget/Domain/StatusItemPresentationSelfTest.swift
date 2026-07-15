@@ -174,6 +174,41 @@ enum StatusItemPresentationSelfTest {
             "accessibility text should omit a collapsed 5h quota"
         )
 
+        let monthlyOnlySource = StatusItemSourceSnapshot(
+            runtime: .codex,
+            fiveHourRemainingPercent: nil,
+            fiveHourResetsAt: nil,
+            sevenDayRemainingPercent: 62,
+            sevenDayResetsAt: now.addingTimeInterval(12 * 24 * 60 * 60),
+            sevenDayWindowDurationMins: 43_800,
+            todayTokens: nil
+        )
+        let monthlyOnly = builder.build(
+            source: monthlyOnlySource,
+            preferences: StatusItemPreferences.default,
+            language: .zh,
+            now: now
+        )
+        expect(monthlyOnly.quotaMetrics.count == 1, "monthly-only data should collapse to one quota")
+        expect(
+            monthlyOnly.quotaMetrics.first?.label == "mo",
+            "monthly long-period quota should use the mo status-item label"
+        )
+        expect(
+            monthlyOnly.tooltip.contains("月额度"),
+            "Chinese tooltip should name monthly quota"
+        )
+        let monthlyEnglish = builder.build(
+            source: monthlyOnlySource,
+            preferences: StatusItemPreferences.default,
+            language: .en,
+            now: now
+        )
+        expect(
+            monthlyEnglish.tooltip.contains("monthly quota"),
+            "English tooltip should name monthly quota"
+        )
+
         var disappearedSelection = StatusItemPreferences.default
         disappearedSelection.visibleMetrics = [.fiveHourQuota]
         let fallbackSelection = builder.build(
