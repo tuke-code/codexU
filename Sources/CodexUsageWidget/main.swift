@@ -3815,6 +3815,7 @@ struct SettingsPanelView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var store: UsageStore
     @ObservedObject var updateStore: AppUpdateStore
+    let onOpenPaletteLibrary: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     private var language: WidgetLanguage { settings.language }
@@ -3860,7 +3861,7 @@ struct SettingsPanelView: View {
                         title: language.text("配色", "Color palette"),
                         detail: language.text("精选内置配色，同时适配浅色与深色", "Curated palettes for both Light and Dark appearances")
                     ) {
-                        PaletteSettingsView(settings: settings)
+                        PaletteSettingsView(settings: settings, onOpenLibrary: onOpenPaletteLibrary)
                             .frame(width: settingsAccessoryColumnWidth)
                     }
 
@@ -8858,6 +8859,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     private lazy var updateStore = AppUpdateStore(settings: settings)
     private var window: MainAppWindow?
     private var settingsWindow: NSWindow?
+    private var paletteLibraryWindow: NSWindow?
     private var titlebarToolbarController: NSTitlebarAccessoryViewController?
     private var statusItem: NSStatusItem?
     private var statusPopover: NSPopover?
@@ -9165,7 +9167,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             settingsWindow.isReleasedWhenClosed = false
             settingsWindow.delegate = self
             settingsWindow.contentView = NSHostingView(
-                rootView: SettingsPanelView(settings: settings, store: store, updateStore: updateStore)
+                rootView: SettingsPanelView(
+                    settings: settings,
+                    store: store,
+                    updateStore: updateStore,
+                    onOpenPaletteLibrary: { [weak self] in self?.openPaletteLibraryWindow() }
+                )
             )
             settingsWindow.center()
             self.settingsWindow = settingsWindow
@@ -9177,6 +9184,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             settingsWindow.deminiaturize(nil)
         }
         settingsWindow.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func openPaletteLibraryWindow() {
+        if paletteLibraryWindow == nil {
+            let paletteLibraryWindow = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 620, height: 560),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            paletteLibraryWindow.title = settings.language.text("配色库", "Palette Library")
+            paletteLibraryWindow.isReleasedWhenClosed = false
+            paletteLibraryWindow.delegate = self
+            paletteLibraryWindow.contentMinSize = NSSize(width: 600, height: 500)
+            paletteLibraryWindow.contentView = NSHostingView(
+                rootView: PaletteLibraryView(settings: settings)
+            )
+            paletteLibraryWindow.center()
+            self.paletteLibraryWindow = paletteLibraryWindow
+        }
+
+        guard let paletteLibraryWindow else { return }
+        paletteLibraryWindow.title = settings.language.text("配色库", "Palette Library")
+        if paletteLibraryWindow.isMiniaturized {
+            paletteLibraryWindow.deminiaturize(nil)
+        }
+        paletteLibraryWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -9192,6 +9227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             .receive(on: RunLoop.main)
             .sink { [weak self] language in
                 self?.settingsWindow?.title = language.text("设置", "Settings")
+                self?.paletteLibraryWindow?.title = language.text("配色库", "Palette Library")
                 self?.setupMainMenu()
                 self?.updateStatusItem()
             }
