@@ -5,17 +5,24 @@ struct PaletteSettingsView: View {
     let onOpenLibrary: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
-    private var selectedDescriptor: PaletteDescriptor? {
-        settings.paletteCatalog
+    private var selectedDescriptor: PaletteDescriptor {
+        let descriptors = settings.paletteCatalog
             .descriptors(language: settings.language == .zh ? "zh-Hans" : "en")
-            .first { $0.id == settings.paletteID }
+        return descriptors.first { $0.id == settings.paletteID }
+            ?? descriptors.first { $0.isDefault }
+            ?? PaletteDescriptor(
+                id: PaletteCatalog.defaultPaletteID,
+                version: "safe-default",
+                displayName: settings.language.text("默认", "Default"),
+                shortDescription: settings.language.text("查看与选择配色", "Browse and choose palettes"),
+                inspirationNote: "",
+                isDefault: true
+            )
     }
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 5) {
-            if let descriptor = selectedDescriptor {
-                currentPaletteButton(descriptor)
-            }
+            currentPaletteButton(selectedDescriptor)
             if let notice = settings.paletteFallbackNotice {
                 Text(settings.language.text("配色不可用，已恢复默认", "Palette unavailable; restored to default"))
                     .font(.system(size: 9, weight: .medium))
@@ -72,64 +79,56 @@ struct PaletteLibraryView: View {
     }
 
     private let columns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12)
+        GridItem(.flexible(), spacing: 14),
+        GridItem(.flexible(), spacing: 14)
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(settings.language.text("精选配色", "Curated Palettes"))
-                    .font(.system(size: 22, weight: .bold))
-                Text(settings.language.text(
-                    "每套配色均同时适配浅色与深色外观，选择后立即应用。",
-                    "Every palette supports both Light and Dark appearances and applies immediately."
-                ))
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.secondary)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
-            .padding(.bottom, 14)
+        ZStack {
+            PaletteLibraryBackdrop(colorScheme: colorScheme)
 
-            Divider().opacity(0.55)
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Button {
+                        settings.resetPalette()
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 12, weight: .semibold))
+                            .frame(width: 30, height: 30)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.48), lineWidth: 0.75))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(settings.paletteID == PaletteCatalog.defaultPaletteID)
+                    .opacity(settings.paletteID == PaletteCatalog.defaultPaletteID ? 0.34 : 1)
+                    .help(settings.language.text("恢复默认配色", "Restore Default Palette"))
+                    .accessibilityLabel(settings.language.text("恢复默认配色", "Restore Default Palette"))
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .frame(height: 48)
 
-            ScrollView(.vertical, showsIndicators: true) {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-                    ForEach(descriptors) { descriptor in
-                        PaletteLibraryCard(
-                            descriptor: descriptor,
-                            catalog: settings.paletteCatalog,
-                            language: settings.language,
-                            selected: descriptor.id == settings.paletteID
-                        ) {
-                            settings.selectPalette(descriptor.id)
+                ScrollView(.vertical, showsIndicators: true) {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                        ForEach(descriptors) { descriptor in
+                            PaletteArtworkCard(
+                                descriptor: descriptor,
+                                catalog: settings.paletteCatalog,
+                                language: settings.language,
+                                selected: descriptor.id == settings.paletteID
+                            ) {
+                                settings.selectPalette(descriptor.id)
+                            }
                         }
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 20)
                 }
-                .padding(16)
             }
-
-            Divider().opacity(0.55)
-
-            HStack {
-                Text(settings.language.text("当前：", "Current: "))
-                    .foregroundStyle(Color.secondary)
-                Text(descriptors.first(where: { $0.id == settings.paletteID })?.displayName ?? settings.paletteID)
-                    .fontWeight(.semibold)
-                Spacer()
-                Button(settings.language.text("恢复默认配色", "Restore Default Palette")) {
-                    settings.resetPalette()
-                }
-                .buttonStyle(.borderless)
-                .disabled(settings.paletteID == PaletteCatalog.defaultPaletteID)
-            }
-            .font(.system(size: 10.5, weight: .medium))
-            .padding(.horizontal, 20)
-            .frame(height: 46)
         }
-        .frame(minWidth: 600, minHeight: 540)
-        .background(FixedVisualPalette.sectionFill(colorScheme).opacity(0.35))
+        .frame(minWidth: 620, minHeight: 520)
         .appVisualEnvironment(
             catalog: settings.paletteCatalog,
             paletteID: settings.paletteID,
@@ -139,122 +138,219 @@ struct PaletteLibraryView: View {
     }
 }
 
-private struct PaletteLibraryCard: View {
+private struct PaletteLibraryBackdrop: View {
+    let colorScheme: ColorScheme
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: colorScheme == .dark
+                    ? [Color.white.opacity(0.055), Color.clear, Color.black.opacity(0.10)]
+                    : [Color.white.opacity(0.40), Color.white.opacity(0.10), Color.black.opacity(0.025)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            RadialGradient(
+                colors: [Color.white.opacity(colorScheme == .dark ? 0.07 : 0.34), Color.clear],
+                center: .topTrailing,
+                startRadius: 0,
+                endRadius: 360
+            )
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+}
+
+private struct PaletteArtworkCard: View {
     let descriptor: PaletteDescriptor
     let catalog: PaletteCatalog
     let language: WidgetLanguage
     let selected: Bool
     let onSelect: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var focused: Bool
+    @State private var hovering = false
+
     private var lightTokens: ResolvedVisualTokens { catalog.resolve(id: descriptor.id, appearance: .light) }
     private var darkTokens: ResolvedVisualTokens { catalog.resolve(id: descriptor.id, appearance: .dark) }
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(descriptor.displayName)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Color.primary)
-                        Text(descriptor.shortDescription)
-                            .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(Color.secondary)
-                            .lineLimit(2)
-                    }
-                    Spacer(minLength: 4)
-                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(selected ? lightTokens.selection.foreground.color : Color.secondary.opacity(0.55))
+            ZStack {
+                HStack(spacing: 0) {
+                    PaletteArtworkHalf(tokens: lightTokens, appearance: .light)
+                    PaletteArtworkHalf(tokens: darkTokens, appearance: .dark)
+                }
+                .overlay(alignment: .center) {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.24))
+                        .frame(width: 0.75)
+                        .blendMode(.overlay)
                 }
 
-                HStack(spacing: 8) {
-                    PaletteAppearancePreview(
-                        title: language.text("浅色", "Light"),
-                        tokens: lightTokens,
-                        background: Color.white.opacity(0.92),
-                        foreground: Color.black.opacity(0.72)
-                    )
-                    PaletteAppearancePreview(
-                        title: language.text("深色", "Dark"),
-                        tokens: darkTokens,
-                        background: Color(red: 0.09, green: 0.10, blue: 0.12),
-                        foreground: Color.white.opacity(0.82)
-                    )
-                }
+                Text(descriptor.displayName)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .tracking(0.35)
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.20), in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.30), lineWidth: 0.7))
+                    .shadow(color: Color.black.opacity(0.24), radius: 8, y: 3)
 
-                Text(descriptor.inspirationNote)
-                    .font(.system(size: 8.5, weight: .medium))
-                    .foregroundStyle(Color.secondary)
-                    .lineLimit(2)
-                    .frame(minHeight: 21, alignment: .topLeading)
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.white)
+                        .frame(width: 24, height: 24)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.48), lineWidth: 0.8))
+                        .shadow(color: Color.black.opacity(0.22), radius: 5, y: 2)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .accessibilityHidden(true)
+                }
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 174, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(selected ? lightTokens.selection.fill.color : FixedVisualPalette.controlFill(.light).opacity(0.55))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(
-                                selected ? lightTokens.selection.stroke.color : Color.secondary.opacity(0.2),
-                                lineWidth: selected ? 1.4 : 0.8
-                            )
+            .aspectRatio(2.20, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(
+                        selected || focused
+                            ? lightTokens.selection.focusRing.color
+                            : Color.white.opacity(hovering ? 0.52 : 0.24),
+                        lineWidth: selected || focused ? 2.4 : 0.8
                     )
+            }
+            .brightness(hovering ? 0.035 : 0)
+            .shadow(
+                color: selected
+                    ? lightTokens.selection.focusRing.color.opacity(0.30)
+                    : Color.black.opacity(hovering ? 0.24 : 0.15),
+                radius: selected ? 16 : (hovering ? 14 : 9),
+                y: hovering ? 7 : 4
             )
         }
         .buttonStyle(.plain)
+        .focused($focused)
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: hovering)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: selected)
         .help(descriptor.shortDescription)
         .accessibilityLabel(descriptor.displayName)
         .accessibilityValue(selected ? language.text("已选择", "Selected") : "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
-private struct PaletteAppearancePreview: View {
-    let title: String
+private struct PaletteArtworkHalf: View {
     let tokens: ResolvedVisualTokens
-    let background: Color
-    let foreground: Color
+    let appearance: PaletteAppearance
 
     var body: some View {
-        HStack(spacing: 8) {
+        GeometryReader { geometry in
+            let size = geometry.size
             ZStack {
-                QuotaRingSegment(
-                    percent: 88,
-                    tokens: tokens.quota.primary,
-                    ringAsset: tokens.assets[.quotaRingPrimary],
-                    capAsset: tokens.assets[.quotaCapPrimary],
-                    lineWidth: 6
+                LinearGradient(
+                    colors: backgroundColors,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
                 )
-                QuotaRingSegment(
-                    percent: 66,
-                    tokens: tokens.quota.secondary,
-                    ringAsset: tokens.assets[.quotaRingSecondary],
-                    capAsset: tokens.assets[.quotaCapSecondary],
-                    lineWidth: 4
-                )
-                .frame(width: 28, height: 28)
-            }
-            .frame(width: 40, height: 40)
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title)
-                    .font(.system(size: 8.5, weight: .semibold))
-                    .foregroundStyle(foreground)
-                PaletteSwatches(tokens: tokens, diameter: 7)
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                Circle()
+                    .fill(RadialGradient(
+                        colors: [tokens.accent.highlight.color.opacity(0.92), tokens.accent.primary.color.opacity(0)],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: max(size.width, size.height) * 0.44
+                    ))
+                    .frame(width: size.width * 1.18, height: size.width * 1.18)
+                    .offset(x: -size.width * 0.34, y: -size.height * 0.28)
+                    .blur(radius: 8)
+
+                PaletteFlowBand(amplitude: 0.20, verticalPosition: 0.34)
                     .fill(LinearGradient(
-                        colors: tokens.data.valueProgress.map(\.color),
+                        colors: [tokens.accent.secondary.color.opacity(0.22), tokens.accent.secondaryStrong.color.opacity(0.92)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .blur(radius: 1.2)
+
+                PaletteFlowBand(amplitude: 0.15, verticalPosition: 0.63)
+                    .fill(LinearGradient(
+                        colors: [tokens.quota.primary.start.color.opacity(0.35), tokens.quota.primary.end.color.opacity(0.94)],
                         startPoint: .leading,
                         endPoint: .trailing
                     ))
-                    .frame(height: 4)
+                    .offset(y: size.height * 0.10)
+
+                Ellipse()
+                    .fill(LinearGradient(
+                        colors: [tokens.ornament.metal.color.opacity(0.76), tokens.accent.highlight.color.opacity(0.08)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ))
+                    .frame(width: size.width * 0.76, height: size.height * 0.23)
+                    .rotationEffect(.degrees(-23))
+                    .offset(x: size.width * 0.30, y: -size.height * 0.26)
+                    .blur(radius: 2.5)
+
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(appearance == .light ? 0.48 : 0.16),
+                        Color.clear,
+                        Color.black.opacity(appearance == .dark ? 0.20 : 0.04)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             }
+            .compositingGroup()
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 7)
-        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(background))
+        .clipped()
+        .accessibilityHidden(true)
+    }
+
+    private var backgroundColors: [Color] {
+        if appearance == .light {
+            return [
+                Color.white.opacity(0.98),
+                tokens.accent.primaryLight.color.opacity(0.78),
+                tokens.surfaceTint.color.color.opacity(0.52)
+            ]
+        }
+        return [
+            Color(red: 0.035, green: 0.04, blue: 0.06),
+            tokens.accent.primaryStrong.color.opacity(0.76),
+            tokens.accent.secondaryStrong.color.opacity(0.90)
+        ]
+    }
+}
+
+private struct PaletteFlowBand: Shape {
+    let amplitude: CGFloat
+    let verticalPosition: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let centerY = rect.height * verticalPosition
+        let rise = rect.height * amplitude
+        var path = Path()
+        path.move(to: CGPoint(x: -rect.width * 0.08, y: centerY - rise * 0.55))
+        path.addCurve(
+            to: CGPoint(x: rect.width * 1.08, y: centerY + rise * 0.20),
+            control1: CGPoint(x: rect.width * 0.22, y: centerY + rise * 1.35),
+            control2: CGPoint(x: rect.width * 0.72, y: centerY - rise * 1.20)
+        )
+        path.addLine(to: CGPoint(x: rect.width * 1.08, y: centerY + rise * 1.28))
+        path.addCurve(
+            to: CGPoint(x: -rect.width * 0.08, y: centerY + rise * 0.54),
+            control1: CGPoint(x: rect.width * 0.72, y: centerY - rise * 0.04),
+            control2: CGPoint(x: rect.width * 0.22, y: centerY + rise * 2.10)
+        )
+        path.closeSubpath()
+        return path
     }
 }
 

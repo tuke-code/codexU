@@ -9190,17 +9190,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     private func openPaletteLibraryWindow() {
         if paletteLibraryWindow == nil {
             let paletteLibraryWindow = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 620, height: 560),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                contentRect: NSRect(x: 0, y: 0, width: 760, height: 620),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
             paletteLibraryWindow.title = settings.language.text("配色库", "Palette Library")
+            paletteLibraryWindow.titleVisibility = .hidden
+            paletteLibraryWindow.titlebarAppearsTransparent = true
             paletteLibraryWindow.isReleasedWhenClosed = false
+            paletteLibraryWindow.isOpaque = false
+            paletteLibraryWindow.backgroundColor = .clear
+            paletteLibraryWindow.hasShadow = true
+            paletteLibraryWindow.isMovableByWindowBackground = true
+            paletteLibraryWindow.acceptsMouseMovedEvents = true
             paletteLibraryWindow.delegate = self
-            paletteLibraryWindow.contentMinSize = NSSize(width: 600, height: 500)
-            paletteLibraryWindow.contentView = NSHostingView(
-                rootView: PaletteLibraryView(settings: settings)
+            paletteLibraryWindow.contentMinSize = NSSize(width: 620, height: 520)
+            paletteLibraryWindow.contentView = GlassHostingContainer(
+                rootView: PaletteLibraryView(settings: settings),
+                cornerRadius: 20
             )
             paletteLibraryWindow.center()
             self.paletteLibraryWindow = paletteLibraryWindow
