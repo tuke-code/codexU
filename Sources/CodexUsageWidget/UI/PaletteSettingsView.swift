@@ -41,7 +41,7 @@ struct PaletteSettingsView: View {
                 PaletteSwatches(tokens: tokens, diameter: 10)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(descriptor.displayName)
-                        .font(.system(size: 10.5, weight: .semibold))
+                        .font(.system(size: settingsControlFontSize, weight: .semibold))
                         .foregroundStyle(Color.primary)
                         .lineLimit(1)
                     Text(settings.language.text("查看与选择配色", "Browse and choose palettes"))
@@ -54,7 +54,11 @@ struct PaletteSettingsView: View {
                     .foregroundStyle(Color.secondary)
             }
             .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: settingsControlVisualHeight,
+                alignment: .leading
+            )
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(FixedVisualPalette.controlFill(colorScheme))

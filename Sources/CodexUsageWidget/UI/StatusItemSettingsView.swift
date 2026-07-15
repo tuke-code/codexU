@@ -1,9 +1,5 @@
 import SwiftUI
 
-private let statusItemSettingsAccessoryWidth: CGFloat = 220
-private let statusItemSettingsControlHeight: CGFloat = 30
-private let statusItemSettingsCornerRadius: CGFloat = 8
-
 struct StatusItemSettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var store: UsageStore
@@ -30,7 +26,7 @@ struct StatusItemSettingsView: View {
                     SettingsSegmentOption(value: .classic, title: language.text("经典", "Classic")),
                     SettingsSegmentOption(value: .rich, title: language.text("丰富", "Rich"))
                 ],
-                width: statusItemSettingsAccessoryWidth
+                width: settingsAccessoryColumnWidth
             )
         }
 
@@ -44,7 +40,7 @@ struct StatusItemSettingsView: View {
                     SettingsSegmentOption(value: .used, title: language.text("已用量", "Used")),
                     SettingsSegmentOption(value: .remaining, title: language.text("剩余量", "Remaining"))
                 ],
-                width: statusItemSettingsAccessoryWidth
+                width: settingsAccessoryColumnWidth
             )
         }
 
@@ -82,11 +78,11 @@ struct StatusItemSettingsView: View {
                 preferenceError = nil
             } label: {
                 Label(language.text("恢复默认", "Restore"), systemImage: "arrow.counterclockwise")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: settingsControlFontSize, weight: .semibold))
                     .foregroundStyle(visualTokens.selection.foreground.color)
-                    .frame(width: statusItemSettingsAccessoryWidth, height: statusItemSettingsControlHeight)
+                    .frame(width: settingsAccessoryColumnWidth, height: settingsControlVisualHeight)
                     .background(
-                        RoundedRectangle(cornerRadius: statusItemSettingsCornerRadius, style: .continuous)
+                        RoundedRectangle(cornerRadius: settingsControlCornerRadius, style: .continuous)
                             .fill(visualTokens.selection.fill.color)
                     )
             }
@@ -181,7 +177,7 @@ private struct StatusItemPreviewRow: View {
             detail: settings.language.text("与菜单栏使用同一套绘制器", "Uses the same renderer as the menu bar")
         ) {
             ZStack {
-                RoundedRectangle(cornerRadius: statusItemSettingsCornerRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: settingsControlCornerRadius, style: .continuous)
                     .fill(previewBackground)
                 Image(nsImage: renderer.render(presentation, tokens: visualTokens, appearance: previewAppearance))
                     .interpolation(.high)
@@ -190,7 +186,7 @@ private struct StatusItemPreviewRow: View {
                         height: presentation.imageSize.height
                     )
             }
-            .frame(width: statusItemSettingsAccessoryWidth, height: 38)
+            .frame(width: settingsAccessoryColumnWidth, height: settingsControlVisualHeight)
             .accessibilityLabel("codexU")
             .accessibilityValue(presentation.accessibilityValue)
         }
@@ -236,13 +232,13 @@ private struct StatusItemMetricMultiSelectControl: View {
                     onToggle(metric)
                 } label: {
                     Text(label(for: metric))
-                        .font(.system(size: 11, weight: isSelected(metric) ? .semibold : .medium))
+                        .font(.system(size: settingsControlFontSize, weight: isSelected(metric) ? .semibold : .medium))
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                         .foregroundStyle(isSelected(metric) ? Color.white : Color.secondary)
-                        .frame(maxWidth: .infinity, minHeight: statusItemSettingsControlHeight)
+                        .frame(maxWidth: .infinity, minHeight: settingsSegmentHeight)
                         .background(
-                            RoundedRectangle(cornerRadius: statusItemSettingsCornerRadius, style: .continuous)
+                            RoundedRectangle(cornerRadius: settingsControlCornerRadius, style: .continuous)
                                 .fill(isSelected(metric) ? selectionColor(for: metric) : Color.clear)
                         )
                         .contentShape(Rectangle())
@@ -264,16 +260,16 @@ private struct StatusItemMetricMultiSelectControl: View {
             }
         }
         .padding(3)
-        .frame(width: statusItemSettingsAccessoryWidth, height: statusItemSettingsControlHeight + 6)
+        .frame(width: settingsAccessoryColumnWidth, height: settingsControlVisualHeight)
         .background(
-            RoundedRectangle(cornerRadius: statusItemSettingsCornerRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: settingsControlCornerRadius, style: .continuous)
                 .fill(FixedVisualPalette.controlFill(colorScheme))
                 .overlay(
-                    RoundedRectangle(cornerRadius: statusItemSettingsCornerRadius, style: .continuous)
+                    RoundedRectangle(cornerRadius: settingsControlCornerRadius, style: .continuous)
                         .strokeBorder(FixedVisualPalette.controlStroke(colorScheme), lineWidth: 0.8)
                 )
         )
-        .clipShape(RoundedRectangle(cornerRadius: statusItemSettingsCornerRadius, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: settingsControlCornerRadius, style: .continuous))
     }
 
     private func isSelected(_ metric: StatusItemMetric) -> Bool {

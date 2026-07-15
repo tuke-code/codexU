@@ -3841,7 +3841,7 @@ struct SettingsPanelView: View {
                                 SettingsSegmentOption(value: .zh, title: "中文"),
                                 SettingsSegmentOption(value: .en, title: "English")
                             ],
-                            width: 156
+                            width: settingsAccessoryColumnWidth
                         )
                     }
 
@@ -3856,7 +3856,7 @@ struct SettingsPanelView: View {
                                 SettingsSegmentOption(value: .light, title: language.text("浅色", "Light")),
                                 SettingsSegmentOption(value: .dark, title: language.text("深色", "Dark"))
                             ],
-                            width: 190
+                            width: settingsAccessoryColumnWidth
                         )
                     }
 
@@ -3881,7 +3881,7 @@ struct SettingsPanelView: View {
                                 SettingsSegmentOption(value: .standard, title: language.text("默认", "Default")),
                                 SettingsSegmentOption(value: .powerSaving, title: language.text("省电", "Power Saving"))
                             ],
-                            width: 190
+                            width: settingsAccessoryColumnWidth
                         )
                     }
                 }
@@ -3925,7 +3925,7 @@ struct SettingsPanelView: View {
                                 SettingsSegmentOption(value: .utc, title: "UTC"),
                                 SettingsSegmentOption(value: .fixed, title: language.text("固定", "Fixed"))
                             ],
-                            width: 250
+                            width: settingsAccessoryColumnWidth
                         )
                     }
 
@@ -3940,7 +3940,11 @@ struct SettingsPanelView: View {
                                 }
                             }
                             .labelsHidden()
-                            .frame(width: 250)
+                            .controlSize(.small)
+                            .frame(
+                                width: settingsAccessoryColumnWidth,
+                                height: settingsControlVisualHeight
+                            )
                         }
                     }
                 }
@@ -3986,11 +3990,20 @@ struct SettingsPanelView: View {
                             )
                             .frame(
                                 width: settingsShortcutRecorderWidth,
-                                height: settingsSegmentHeight
+                                height: settingsControlVisualHeight
                             )
 
-                            Button(language.text("恢复默认", "Restore Default")) {
+                            Button {
                                 settings.resetGlobalShortcut()
+                            } label: {
+                                Text(language.text("恢复默认", "Restore Default"))
+                                    .font(.system(size: settingsControlFontSize, weight: .medium))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.78)
+                                    .frame(
+                                        width: settingsShortcutActionWidth,
+                                        height: settingsControlVisualHeight
+                                    )
                             }
                             .buttonStyle(.borderless)
                             .disabled(
@@ -3998,6 +4011,7 @@ struct SettingsPanelView: View {
                                     && settings.globalShortcutError == nil
                             )
                         }
+                        .frame(width: settingsAccessoryColumnWidth, alignment: .trailing)
                     }
 
                     if let error = settings.globalShortcutError {
@@ -4111,7 +4125,7 @@ struct SettingsPanelView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionTitle(title: title, detail: detail)
+            SettingsSectionTitle(title: title, detail: detail)
             VStack(spacing: 0) {
                 content()
             }
@@ -4149,6 +4163,24 @@ struct SettingsPickerRow<Control: View>: View {
     }
 }
 
+private struct SettingsSectionTitle: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .font(.system(size: settingsSectionTitleFontSize, weight: .semibold))
+                .lineLimit(1)
+            Spacer(minLength: 12)
+            Text(detail)
+                .font(.system(size: settingsSectionDetailFontSize, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+}
+
 struct SettingsSegmentOption<Value: Hashable>: Identifiable {
     let value: Value
     let title: String
@@ -4170,7 +4202,7 @@ struct SettingsSegmentedControl<Value: Hashable>: View {
                     selection = option.value
                 } label: {
                     Text(option.title)
-                        .font(.system(size: 12, weight: selection == option.value ? .semibold : .medium))
+                        .font(.system(size: settingsControlFontSize, weight: selection == option.value ? .semibold : .medium))
                         .lineLimit(1)
                         .minimumScaleFactor(0.82)
                         .foregroundStyle(selection == option.value ? Color.white : Color.secondary)
@@ -4194,7 +4226,7 @@ struct SettingsSegmentedControl<Value: Hashable>: View {
             }
         }
         .padding(3)
-        .frame(width: width, height: settingsSegmentHeight + 6)
+        .frame(width: width, height: settingsControlVisualHeight)
         .background(
             RoundedRectangle(cornerRadius: settingsControlCornerRadius, style: .continuous)
                 .fill(FixedVisualPalette.controlFill(colorScheme))
@@ -4223,7 +4255,7 @@ struct SettingsRuntimeMultiSelectControl: View {
                     HStack(spacing: 6) {
                         RuntimeLogoView(scope: scope, size: 16)
                         Text(label(for: scope))
-                            .font(.system(size: 12, weight: isSelected(scope) ? .semibold : .medium))
+                            .font(.system(size: settingsControlFontSize, weight: isSelected(scope) ? .semibold : .medium))
                             .lineLimit(1)
                             .minimumScaleFactor(0.82)
                     }
@@ -4248,7 +4280,7 @@ struct SettingsRuntimeMultiSelectControl: View {
             }
         }
         .padding(3)
-        .frame(width: settingsAccessoryColumnWidth, height: settingsSegmentHeight + 6)
+        .frame(width: settingsAccessoryColumnWidth, height: settingsControlVisualHeight)
         .background(
             RoundedRectangle(cornerRadius: settingsControlCornerRadius, style: .continuous)
                 .fill(FixedVisualPalette.controlFill(colorScheme))
@@ -4318,7 +4350,7 @@ struct SettingsValueRow: View {
     var body: some View {
         SettingsBaseRow(title: title, detail: detail) {
             Text(value)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .font(.system(size: settingsControlFontSize, weight: .semibold, design: .rounded))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -4342,14 +4374,14 @@ struct SettingsErrorRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: settingsRowTitleFontSize, weight: .semibold))
                     .foregroundStyle(FixedVisualPalette.statusDanger)
                 Text(message)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: settingsRowDetailFontSize, weight: .regular))
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(currentValue)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: settingsRowDetailFontSize, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
@@ -4386,10 +4418,10 @@ struct SettingsBaseRow<Accessory: View>: View {
         HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: settingsRowTitleFontSize, weight: .semibold))
                     .foregroundStyle(.primary)
                 Text(detail)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: settingsRowDetailFontSize, weight: .regular))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -8137,12 +8169,21 @@ private let dashboardCardTitleSize: CGFloat = 11
 private let dashboardListRowSpacing: CGFloat = 6
 private let dashboardRowPadding: CGFloat = 7
 private let dashboardRowCornerRadius: CGFloat = 8
-private let settingsAccessoryColumnWidth: CGFloat = 220
-private let settingsControlCornerRadius: CGFloat = 8
-private let settingsSegmentHeight: CGFloat = 30
+let settingsAccessoryColumnWidth: CGFloat = 220
+let settingsControlCornerRadius: CGFloat = 8
+let settingsSegmentHeight: CGFloat = 30
+let settingsControlVisualHeight: CGFloat = settingsSegmentHeight + 6
+let settingsSectionTitleFontSize: CGFloat = 12.5
+let settingsSectionDetailFontSize: CGFloat = 10
+let settingsRowTitleFontSize: CGFloat = 11.5
+let settingsRowDetailFontSize: CGFloat = 9.5
+let settingsControlFontSize: CGFloat = 11
 private let settingsSwitchWidth: CGFloat = 56
 private let settingsShortcutControlSpacing: CGFloat = 8
 private let settingsShortcutRecorderWidth: CGFloat = 132
+private let settingsShortcutActionWidth: CGFloat = settingsAccessoryColumnWidth
+    - settingsShortcutRecorderWidth
+    - settingsShortcutControlSpacing
 private let usageTrendCardHeight: CGFloat = 214
 private let usageTrendCardSpacing: CGFloat = dashboardGridSpacing
 private let usageSevenDayMinimumCardWidth: CGFloat = 260
