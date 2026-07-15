@@ -608,6 +608,7 @@ final class UsageStore: ObservableObject {
     @Published private(set) var isSwitchingStatisticsTimeZone = false
     @Published private(set) var visualEnergyMode: VisualEnergyMode = .suspended
     @Published private(set) var codexLiveTasks: CodexTaskLiveSnapshot = .disconnected
+    @Published private(set) var taskFocusRequest: TaskFocusRequest?
 
     private var fullTimer: Timer?
     private var taskBoardTimer: Timer?
@@ -625,6 +626,7 @@ final class UsageStore: ObservableObject {
     private var isMainWindowActive = false
     private var isTaskBoardSelected = false
     private var lastFullRefreshCompletedAt: Date?
+    private var baseTaskBoards: [RuntimeScope: TaskBoard] = [:]
     private let statisticsSnapshotCacheLimit = 4
     private let statisticsSnapshotCacheTTL: TimeInterval = 3 * 60
     private let taskBoardRefreshInterval: TimeInterval = 60
@@ -635,7 +637,7 @@ final class UsageStore: ObservableObject {
     init(codexTaskClient: CodexTaskEventClient = CodexAppServerTaskClient()) {
         self.codexTaskClient = codexTaskClient
         self.codexTaskClient.onSnapshot = { [weak self] snapshot in
-            self?.codexLiveTasks = snapshot
+            self?.applyCodexLiveTasks(snapshot)
         }
     }
 
@@ -686,6 +688,7 @@ final class UsageStore: ObservableObject {
         scheduleStatisticsRollover()
         scheduleFullRefreshTimer()
         updateTaskBoardPollingState(refreshImmediately: false)
+        updateCodexTaskConnection()
     }
 
     func stop() {
@@ -842,6 +845,52 @@ final class UsageStore: ObservableObject {
         updateCodexTaskConnection()
     }
 
+    func requestTaskFocus(scope: RuntimeScope, threadID: String?) {
+        selectRuntime(scope)
+        taskFocusRequest = TaskFocusRequest(id: UUID(), runtimeScope: scope, threadID: threadID)
+    }
+
+    @discardableResult
+    func submitApproval(_ approval: TaskApprovalRequest, decision: TaskApprovalDecision) -> Bool {
+        codexTaskClient.submit(requestID: approval.requestID, decision: decision)
+    }
+
+    func attentionItems(for scopes: [RuntimeScope], updateResult: AppUpdateResult) -> [TaskAttentionItem] {
+        var items: [TaskAttentionItem] = []
+        for scope in scopes {
+            guard let runtime = runtimeSnapshot(for: scope) else { continue }
+            items.append(contentsOf: runtime.snapshot.taskBoard?.attentionItems(scope: scope) ?? [])
+            if runtime.status == .unavailable || runtime.status == .stale || runtime.status == .snapshotNeeded {
+                items.append(TaskAttentionItem(
+                    id: "data-\(scope.runtimeId)-\(runtime.status.rawValue)",
+                    kind: .dataIssue,
+                    runtimeScope: scope,
+                    threadID: nil,
+                    title: scope.displayName,
+                    since: runtime.snapshot.refreshedAt
+                ))
+            }
+        }
+        if updateResult.status == .updateAvailable {
+            items.append(TaskAttentionItem(
+                id: "update-\(updateResult.latestVersionLabel ?? "available")",
+                kind: .update,
+                runtimeScope: nil,
+                threadID: nil,
+                title: updateResult.latestVersionLabel ?? "codexU",
+                since: updateResult.checkedAt
+            ))
+        }
+        return items
+    }
+
+    func highestPriorityAttention(
+        for scopes: [RuntimeScope],
+        updateResult: AppUpdateResult
+    ) -> TaskAttentionItem? {
+        TaskAttentionSelector.highestPriority(attentionItems(for: scopes, updateResult: updateResult))
+    }
+
     func runtimeSnapshot(for scope: RuntimeScope) -> RuntimeUsageSnapshot? {
         runtimeSnapshots.first { $0.scope == scope }
     }
@@ -863,6 +912,7 @@ final class UsageStore: ObservableObject {
             refreshIfStale(maximumAge: foregroundFullRefreshInterval)
         }
         updateTaskBoardPollingState(refreshImmediately: isTaskBoardPollingEnabled)
+        updateCodexTaskConnection()
     }
 
     private func updateVisualEnergyMode() {
@@ -987,10 +1037,21 @@ final class UsageStore: ObservableObject {
             previous: runtimeSnapshots,
             incoming: multiSnapshot.runtimes
         )
+        for runtime in reconciledRuntimes {
+            if let board = runtime.snapshot.taskBoard {
+                baseTaskBoards[runtime.scope] = board
+            }
+        }
+        let displayedRuntimes = reconciledRuntimes.map { runtime -> RuntimeUsageSnapshot in
+            guard runtime.scope == .codex,
+                  let board = baseTaskBoards[.codex]
+            else { return runtime }
+            return runtime.replacingTaskBoard(board.merging(codexLiveTasks))
+        }
         let reconciledSnapshot = MultiRuntimeUsageSnapshot(
             refreshedAt: multiSnapshot.refreshedAt,
-            runtimes: reconciledRuntimes,
-            aggregate: multiSnapshot.aggregate,
+            runtimes: displayedRuntimes,
+            aggregate: AgentUsageAggregator().aggregate(displayedRuntimes, at: multiSnapshot.refreshedAt),
             statisticsIdentity: multiSnapshot.statisticsIdentity
         )
         let nextScope = reconciledSnapshot.defaultScope(
@@ -998,12 +1059,28 @@ final class UsageStore: ObservableObject {
             allowedScopes: visibleRuntimeScopes
         )
         multiRuntimeSnapshot = reconciledSnapshot
-        runtimeSnapshots = reconciledRuntimes
+        runtimeSnapshots = displayedRuntimes
         selectedRuntimeScope = nextScope
         snapshot = reconciledSnapshot.displaySnapshot(for: nextScope)
     }
 
     private func applyTaskBoard(_ taskBoard: TaskBoard?, for scope: RuntimeScope) {
+        if let taskBoard {
+            baseTaskBoards[scope] = taskBoard
+        }
+        let displayedBoard = scope == .codex
+            ? taskBoard?.merging(codexLiveTasks)
+            : taskBoard
+        publishTaskBoard(displayedBoard, for: scope)
+    }
+
+    private func applyCodexLiveTasks(_ liveTasks: CodexTaskLiveSnapshot) {
+        codexLiveTasks = liveTasks
+        guard let baseBoard = baseTaskBoards[.codex] else { return }
+        publishTaskBoard(baseBoard.merging(liveTasks), for: .codex)
+    }
+
+    private func publishTaskBoard(_ taskBoard: TaskBoard?, for scope: RuntimeScope) {
         guard let index = runtimeSnapshots.firstIndex(where: { $0.scope == scope }) else {
             guard snapshot.taskBoard?.columns != taskBoard?.columns else { return }
             snapshot = snapshot.replacingTaskBoard(taskBoard)
@@ -2343,9 +2420,7 @@ final class CodexUsageReader {
         let calendar = context.statistics.calendar
         let now = context.now
         let dayStart = calendar.startOfDay(for: now)
-        let activeCutoff = now.addingTimeInterval(-2 * 60 * 60)
-
-        var activeItems: [TaskItem] = []
+        let activeItems: [TaskItem] = []
         var pendingItems: [TaskItem] = []
         var doneItems: [TaskItem] = []
 
@@ -2381,13 +2456,11 @@ final class CodexUsageReader {
             let todayThreads = runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: todayThreadsQuery)
             for object in todayThreads {
                 let updatedAt = dateFromEpoch(object["recencyAt"]) ?? dateFromEpoch(object["updatedAt"])
-                let kind: TaskColumnKind = (updatedAt ?? .distantPast) >= activeCutoff ? .active : .pending
+                // Recency is not a runtime signal. Stored threads stay in the
+                // pending/recorded column until app-server supplies live state.
+                let kind: TaskColumnKind = .pending
                 let item = makeThreadTaskItem(object: object, updatedAt: updatedAt, kind: kind)
-                if kind == .active {
-                    activeItems.append(item)
-                } else {
-                    pendingItems.append(item)
-                }
+                pendingItems.append(item)
             }
 
             doneItems = runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: archivedTodayQuery).map { object in
@@ -3380,6 +3453,7 @@ struct UsageWidgetView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @State private var selectedDashboardTab: DashboardTab = .tasks
+    @State private var focusedThreadID: String?
 
     static let widgetWidth: CGFloat = 820
     static let widgetDefaultHeight: CGFloat = 720
@@ -3423,6 +3497,17 @@ struct UsageWidgetView: View {
         }
         .onChange(of: selectedDashboardTab) { tab in
             store.setTaskBoardSelected(tab == .tasks)
+        }
+        .onChange(of: store.taskFocusRequest) { request in
+            guard let request else { return }
+            selectedDashboardTab = .tasks
+            focusedThreadID = request.threadID
+            let requestID = request.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                if store.taskFocusRequest?.id == requestID {
+                    focusedThreadID = nil
+                }
+            }
         }
     }
 
@@ -3627,7 +3712,14 @@ struct UsageWidgetView: View {
     private var taskBoardContent: some View {
         HStack(alignment: .top, spacing: 8) {
             ForEach(taskBoardColumns) { column in
-                TaskBoardColumnView(column: column, language: language)
+                TaskBoardColumnView(
+                    column: column,
+                    language: language,
+                    focusedThreadID: focusedThreadID,
+                    onDecision: { approval, decision in
+                        store.submitApproval(approval, decision: decision)
+                    }
+                )
                     .frame(maxWidth: .infinity, alignment: .top)
             }
         }
@@ -3640,12 +3732,24 @@ struct UsageWidgetView: View {
             Text("\(language.text("刷新", "Refreshed")) \(timeOnly(snapshot.refreshedAt, language: language))")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.secondary)
+                .help(dataTrustHelp)
             if let shortcut = settings.globalShortcut {
                 Text(shortcut.displayName)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
         }
+    }
+
+    private var dataTrustHelp: String {
+        guard let runtime = store.runtimeSnapshot(for: store.selectedRuntimeScope) else {
+            return language.text("数据暂不可用", "Data unavailable")
+        }
+        let status = runtime.status.localized(language)
+        return language.text(
+            "状态：\(status)\n额度：\(runtime.quotaSourceLabel)\n用量：\(runtime.usageSourceLabel)\n最后成功刷新：\(timeOnly(snapshot.refreshedAt, language: language))",
+            "Status: \(status)\nQuota: \(runtime.quotaSourceLabel)\nUsage: \(runtime.usageSourceLabel)\nLast refresh: \(timeOnly(snapshot.refreshedAt, language: language))"
+        )
     }
 
     private var taskBoardSummary: String {
@@ -8123,6 +8227,8 @@ struct DashboardCardHeader<Trailing: View>: View {
 struct TaskBoardColumnView: View {
     let column: TaskColumn
     let language: WidgetLanguage
+    let focusedThreadID: String?
+    let onDecision: (TaskApprovalRequest, TaskApprovalDecision) -> Bool
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -8158,7 +8264,12 @@ struct TaskBoardColumnView: View {
                 .frame(height: 66)
             } else {
                 ForEach(column.items) { item in
-                    TaskIssueCard(item: item, language: language)
+                    TaskIssueCard(
+                        item: item,
+                        language: language,
+                        isFocused: item.threadID != nil && item.threadID == focusedThreadID,
+                        onDecision: onDecision
+                    )
                 }
                 if column.count > column.items.count {
                     Text(language.text("+ \(column.count - column.items.count) 项", "+ \(column.count - column.items.count) more"))
@@ -8185,6 +8296,10 @@ struct TaskBoardColumnView: View {
 struct TaskIssueCard: View {
     let item: TaskItem
     let language: WidgetLanguage
+    let isFocused: Bool
+    let onDecision: (TaskApprovalRequest, TaskApprovalDecision) -> Bool
+    @State private var showsApprovalDetail = false
+    @State private var actionFailed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -8216,8 +8331,14 @@ struct TaskIssueCard: View {
                     .truncationMode(.tail)
             }
 
+            taskIntervention
+
             HStack(spacing: 5) {
-                TaskChip(text: item.chip, kind: item.kind)
+                TaskChip(
+                    text: localizedTaskState(item, language: language),
+                    kind: item.kind,
+                    runtimeState: item.runtimeState
+                )
                 Spacer(minLength: 4)
                 TaskAvatar(text: taskAvatarText(item), kind: item.kind)
             }
@@ -8225,6 +8346,124 @@ struct TaskIssueCard: View {
         .padding(dashboardRowPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardBackground(cornerRadius: dashboardRowCornerRadius, elevated: true)
+        .overlay(
+            RoundedRectangle(cornerRadius: dashboardRowCornerRadius, style: .continuous)
+                .strokeBorder(
+                    isFocused ? FixedVisualPalette.statusInfo : Color.clear,
+                    lineWidth: isFocused ? 1.5 : 0
+                )
+        )
+        .animation(.easeOut(duration: 0.18), value: isFocused)
+    }
+
+    @ViewBuilder
+    private var taskIntervention: some View {
+        if let approval = item.approval {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(approval.summary)
+                    .font(.system(size: 9, weight: .semibold))
+                    .lineLimit(2)
+                if let reason = approval.reason, !reason.isEmpty {
+                    Text(reason)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                if let detail = approval.detail, !detail.isEmpty {
+                    Button {
+                        showsApprovalDetail.toggle()
+                    } label: {
+                        Label(
+                            showsApprovalDetail
+                                ? language.text("收起详情", "Hide details")
+                                : language.text("查看详情", "View details"),
+                            systemImage: showsApprovalDetail ? "chevron.up" : "chevron.down"
+                        )
+                        .font(.system(size: 9, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    if showsApprovalDetail {
+                        Text(detail)
+                            .font(.system(size: 9, weight: .regular, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(5)
+                            .textSelection(.enabled)
+                    }
+                }
+                approvalActions(approval)
+                if actionFailed {
+                    Text(language.text("请求已失效，请返回 Codex 处理", "Request is no longer available; handle it in Codex"))
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(FixedVisualPalette.statusWarning)
+                }
+            }
+            .padding(.top, 2)
+        } else if item.runtimeState == .waitingApproval {
+            Text(language.text("请在 Codex 中处理审批", "Handle this approval in Codex"))
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(FixedVisualPalette.statusWarning)
+        } else if item.runtimeState == .waitingInput {
+            Text(language.text("请返回 Codex 补充信息", "Return to Codex to answer"))
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(FixedVisualPalette.statusWarning)
+        } else if item.runtimeState == .disconnected {
+            Text(language.text("实时连接已断开", "Live connection disconnected"))
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func approvalActions(_ approval: TaskApprovalRequest) -> some View {
+        if approval.submissionState == .submitting {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(language.text("正在提交决定", "Submitting decision"))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            HStack(spacing: 5) {
+                if approval.availableDecisions.contains(.accept) {
+                    Button(language.text("允许一次", "Allow once")) {
+                        submit(approval, decision: .accept)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.mini)
+                }
+                if approval.availableDecisions.contains(.decline) {
+                    Button(language.text("拒绝", "Decline")) {
+                        submit(approval, decision: .decline)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+                if approval.availableDecisions.contains(.cancel) {
+                    Button(language.text("停止", "Stop"), role: .destructive) {
+                        submit(approval, decision: .cancel)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+                if approval.availableDecisions.contains(.acceptForSession) {
+                    Menu {
+                        Button(language.text("本会话允许", "Allow for session")) {
+                            submit(approval, decision: .acceptForSession)
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .controlSize(.mini)
+                    .help(language.text("更多审批选项", "More approval options"))
+                }
+            }
+        }
+    }
+
+    private func submit(_ approval: TaskApprovalRequest, decision: TaskApprovalDecision) {
+        actionFailed = !onDecision(approval, decision)
     }
 }
 
@@ -8248,6 +8487,7 @@ struct TaskAvatar: View {
 struct TaskChip: View {
     let text: String
     let kind: TaskColumnKind
+    let runtimeState: TaskRuntimeState
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -8268,6 +8508,16 @@ struct TaskChip: View {
     }
 
     private var chipAccentColor: Color {
+        switch runtimeState {
+        case .failed:
+            return FixedVisualPalette.statusDanger
+        case .waitingApproval, .waitingInput, .running:
+            return FixedVisualPalette.statusWarning
+        case .completed:
+            return FixedVisualPalette.statusSuccess
+        case .recorded, .idle, .interrupted, .disconnected:
+            break
+        }
         switch text.lowercased() {
         case "high", "urgent":
             return FixedVisualPalette.statusDanger
@@ -8286,6 +8536,16 @@ struct TaskChip: View {
 
     private var chipForegroundColor: Color {
         guard colorScheme == .light else { return chipAccentColor }
+        switch runtimeState {
+        case .failed:
+            return FixedVisualPalette.statusDangerLightText
+        case .waitingApproval, .waitingInput, .running:
+            return FixedVisualPalette.statusWarningLightText
+        case .completed:
+            return FixedVisualPalette.statusSuccessLightText
+        case .recorded, .idle, .interrupted, .disconnected:
+            break
+        }
         switch text.lowercased() {
         case "high", "urgent":
             return FixedVisualPalette.statusDangerLightText
@@ -8301,6 +8561,24 @@ struct TaskChip: View {
     }
 
     private var chipIcon: String {
+        switch runtimeState {
+        case .waitingApproval:
+            return "checkmark.shield.fill"
+        case .waitingInput:
+            return "questionmark.bubble.fill"
+        case .failed:
+            return "exclamationmark.triangle.fill"
+        case .running:
+            return "record.circle"
+        case .completed:
+            return "checkmark.circle.fill"
+        case .interrupted:
+            return "stop.circle.fill"
+        case .disconnected:
+            return "bolt.slash.fill"
+        case .recorded, .idle:
+            break
+        }
         switch text.lowercased() {
         case "cron", "wake":
             return "clock.fill"
@@ -8503,8 +8781,11 @@ private let usageHeatmapMonthLabelHeight: CGFloat = 16
 private let heatmapCellSize: CGFloat = 10
 private let chartTooltipWidth: CGFloat = 188
 
-func runtimeStatusPopoverHeight(for runtimeCount: Int) -> CGFloat {
-    runtimeCount <= 1 ? 352 : 478
+func runtimeStatusPopoverHeight(for runtimeCount: Int, hasAttention: Bool) -> CGFloat {
+    if runtimeCount <= 1 {
+        return hasAttention ? 302 : 246
+    }
+    return hasAttention ? 430 : 374
 }
 
 private func chartTooltipPosition(anchor: CGPoint, containerSize: CGSize, rowCount: Int) -> CGPoint {
@@ -8853,6 +9134,33 @@ private func localizedTaskDetail(_ detail: String, language: WidgetLanguage) -> 
         .replacingOccurrences(of: "每天", with: "Daily")
         .replacingOccurrences(of: "每周", with: "Weekly")
         .replacingOccurrences(of: "每小时", with: "Hourly")
+}
+
+private func localizedTaskState(_ item: TaskItem, language: WidgetLanguage) -> String {
+    if item.kind == .scheduled { return item.chip }
+    if item.kind == .done, item.runtimeState == .recorded {
+        return language.text("已完成", "Done")
+    }
+    switch item.runtimeState {
+    case .recorded:
+        return item.isRealtime ? language.text("实时", "Live") : language.text("记录", "Recorded")
+    case .idle:
+        return language.text("空闲", "Idle")
+    case .running:
+        return language.text("执行中", "Running")
+    case .waitingApproval:
+        return language.text("等待审批", "Approval")
+    case .waitingInput:
+        return language.text("等待回答", "Needs input")
+    case .failed:
+        return language.text("失败", "Failed")
+    case .completed:
+        return language.text("已完成", "Completed")
+    case .interrupted:
+        return language.text("已中断", "Interrupted")
+    case .disconnected:
+        return language.text("连接断开", "Disconnected")
+    }
 }
 
 private func localizedReaderMessage(_ message: String, language: WidgetLanguage) -> String {
@@ -9639,7 +9947,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
                 self.store.updateVisibleRuntimeScopes(scopes)
                 self.statusPopover?.contentSize = CGSize(
                     width: 380,
-                    height: runtimeStatusPopoverHeight(for: scopes.count)
+                    height: runtimeStatusPopoverHeight(
+                        for: scopes.count,
+                        hasAttention: self.currentPopoverAttention != nil
+                    )
                 )
                 self.updateStatusItem()
             }
@@ -9678,7 +9989,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         popover.animates = true
         popover.contentSize = CGSize(
             width: 380,
-            height: runtimeStatusPopoverHeight(for: settings.visibleRuntimeScopes.count)
+            height: runtimeStatusPopoverHeight(
+                for: settings.visibleRuntimeScopes.count,
+                hasAttention: currentPopoverAttention != nil
+            )
         )
         popover.delegate = self
         popover.contentViewController = NSHostingController(
@@ -9691,6 +10005,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
                 },
                 openCurrent: { [weak self] in
                     self?.openMainWindow(selecting: nil)
+                },
+                openAttention: { [weak self] item in
+                    self?.openAttentionItem(item)
                 },
                 openSettings: { [weak self] in
                     self?.openSettingsWindow()
@@ -9727,6 +10044,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             store.selectRuntime(scope)
         }
         showMainWindow()
+    }
+
+    private var currentPopoverAttention: TaskAttentionItem? {
+        store.highestPriorityAttention(
+            for: settings.visibleRuntimeScopes,
+            updateResult: updateStore.result
+        )
+    }
+
+    private func openAttentionItem(_ item: TaskAttentionItem) {
+        if item.kind == .update {
+            updateStore.openPreferredUpdateURL()
+            return
+        }
+        let scope = item.runtimeScope ?? store.selectedRuntimeScope
+        if item.threadID != nil {
+            store.requestTaskFocus(scope: scope, threadID: item.threadID)
+        } else {
+            store.selectRuntime(scope)
+        }
+        showMainWindow()
+    }
+
+    private func updateStatusPopoverSize() {
+        guard statusPopover?.isShown == true else { return }
+        statusPopover?.contentSize = CGSize(
+            width: 380,
+            height: runtimeStatusPopoverHeight(
+                for: settings.visibleRuntimeScopes.count,
+                hasAttention: currentPopoverAttention != nil
+            )
+        )
     }
 
     func popoverDidClose(_ notification: Notification) {
@@ -9840,6 +10189,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             .receive(on: RunLoop.main)
             .sink { [weak self] _, _, _ in
                 self?.updateStatusItem()
+                self?.updateStatusPopoverSize()
+            }
+            .store(in: &cancellables)
+
+        store.$runtimeSnapshots
+            .combineLatest(updateStore.$result)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _ in
+                self?.updateStatusPopoverSize()
             }
             .store(in: &cancellables)
     }

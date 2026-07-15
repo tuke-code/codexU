@@ -549,6 +549,12 @@ struct TaskAttentionItem: Identifiable, Equatable {
     let since: Date?
 }
 
+struct TaskFocusRequest: Equatable {
+    let id: UUID
+    let runtimeScope: RuntimeScope
+    let threadID: String?
+}
+
 enum TaskAttentionSelector {
     static func highestPriority(_ items: [TaskAttentionItem]) -> TaskAttentionItem? {
         items.sorted { lhs, rhs in
