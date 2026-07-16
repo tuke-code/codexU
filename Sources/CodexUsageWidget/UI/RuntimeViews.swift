@@ -279,6 +279,8 @@ struct RuntimeStatusMenuView: View {
             fiveHourResetsAt: nil,
             sevenDayRemainingPercent: nil,
             sevenDayResetsAt: nil,
+            monthlyRemainingPercent: nil,
+            monthlyResetsAt: nil,
             todayTokens: nil,
             sourceLabel: language.text("等待本机统计", "Waiting for local records")
         )
@@ -371,6 +373,14 @@ struct RuntimeSummaryCard: View {
                 title: language.text("7日剩余", "7d left"),
                 value: value,
                 resetsAt: summary.sevenDayResetsAt
+            ))
+        }
+        if let value = summary.monthlyRemainingPercent {
+            items.append(RuntimeQuotaSummaryItem(
+                id: "monthly",
+                title: language.text("月剩余", "mo left"),
+                value: value,
+                resetsAt: summary.monthlyResetsAt
             ))
         }
         return items
@@ -498,6 +508,7 @@ struct RuntimeSummaryCard: View {
     private var localizedSourceLabel: String {
         let hasQuota = summary.fiveHourRemainingPercent != nil
             || summary.sevenDayRemainingPercent != nil
+            || summary.monthlyRemainingPercent != nil
         if language.isChinese {
             switch summary.scope {
             case .codex:
