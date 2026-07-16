@@ -26,6 +26,7 @@ run_check() {
 }
 
 run_check task-runtime "$BIN" --self-test-task-runtime
+run_check codex-session-link "$BIN" --self-test-codex-session-link
 run_check performance-monitor "$BIN" --self-test-performance-monitor
 run_check phase-one-gate "$BIN" --self-test-phase-one-gate
 run_check rate-limits "$BIN" --self-test-rate-limits

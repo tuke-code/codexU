@@ -3762,6 +3762,9 @@ struct UsageWidgetView: View {
                     column: column,
                     language: language,
                     focusedThreadID: focusedThreadID,
+                    onOpenSession: { threadID in
+                        CodexSessionOpener.open(threadID: threadID)
+                    },
                     onDecision: { approval, decision in
                         store.submitApproval(approval, decision: decision)
                     }
@@ -8274,6 +8277,7 @@ struct TaskBoardColumnView: View {
     let column: TaskColumn
     let language: WidgetLanguage
     let focusedThreadID: String?
+    let onOpenSession: (String) -> Bool
     let onDecision: (TaskApprovalRequest, TaskApprovalDecision) -> Bool
     @Environment(\.colorScheme) private var colorScheme
 
@@ -8314,6 +8318,7 @@ struct TaskBoardColumnView: View {
                         item: item,
                         language: language,
                         isFocused: item.threadID != nil && item.threadID == focusedThreadID,
+                        onOpenSession: onOpenSession,
                         onDecision: onDecision
                     )
                 }
@@ -8343,11 +8348,34 @@ struct TaskIssueCard: View {
     let item: TaskItem
     let language: WidgetLanguage
     let isFocused: Bool
+    let onOpenSession: (String) -> Bool
     let onDecision: (TaskApprovalRequest, TaskApprovalDecision) -> Bool
     @State private var showsApprovalDetail = false
     @State private var actionFailed = false
+    @State private var sessionOpenFailed = false
 
+    @ViewBuilder
     var body: some View {
+        if canOpenSession && item.approval == nil {
+            Button {
+                openSession()
+            } label: {
+                cardSurface(showsOpenButton: false)
+            }
+            .buttonStyle(.plain)
+            .help(language.text("在 Codex 中打开", "Open in Codex"))
+            .accessibilityHint(language.text("打开对应的 Codex Session", "Opens the matching Codex session"))
+        } else {
+            cardSurface(showsOpenButton: canOpenSession)
+        }
+    }
+
+    private var canOpenSession: Bool {
+        guard let threadID = item.threadID else { return false }
+        return CodexSessionLink.url(threadID: threadID) != nil
+    }
+
+    private func cardSurface(showsOpenButton: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(item.code)
@@ -8360,6 +8388,25 @@ struct TaskIssueCard: View {
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                }
+                if canOpenSession {
+                    if showsOpenButton {
+                        Button {
+                            openSession()
+                        } label: {
+                            Image(systemName: "arrow.up.forward.app")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(language.text("在 Codex 中打开", "Open in Codex"))
+                        .accessibilityLabel(language.text("在 Codex 中打开", "Open in Codex"))
+                    } else {
+                        Image(systemName: "arrow.up.forward.app")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
+                    }
                 }
             }
 
@@ -8378,6 +8425,12 @@ struct TaskIssueCard: View {
             }
 
             taskIntervention
+
+            if sessionOpenFailed {
+                Text(language.text("无法打开 Codex Session", "Could not open Codex session"))
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(FixedVisualPalette.statusWarning)
+            }
 
             HStack(spacing: 5) {
                 TaskChip(
@@ -8400,6 +8453,11 @@ struct TaskIssueCard: View {
                 )
         )
         .animation(.easeOut(duration: 0.18), value: isFocused)
+    }
+
+    private func openSession() {
+        guard let threadID = item.threadID else { return }
+        sessionOpenFailed = !onOpenSession(threadID)
     }
 
     @ViewBuilder
@@ -10477,6 +10535,10 @@ struct codexUMain {
 
         if CommandLine.arguments.contains("--self-test-task-runtime") {
             exit(TaskRuntimeSelfTest.run() ? 0 : 1)
+        }
+
+        if CommandLine.arguments.contains("--self-test-codex-session-link") {
+            exit(CodexSessionLinkSelfTest.run() ? 0 : 1)
         }
 
         if CommandLine.arguments.contains("--self-test-performance-monitor") {
