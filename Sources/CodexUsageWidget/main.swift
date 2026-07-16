@@ -8552,6 +8552,7 @@ struct TaskChip: View {
             Capsule(style: .continuous)
                 .fill(chipAccentColor.opacity(0.13))
         )
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var chipAccentColor: Color {
