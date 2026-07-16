@@ -9,6 +9,19 @@ enum TaskRuntimeSelfTest {
         }
 
         let now = Date()
+        expect(
+            TaskActivityClassifier.column(updatedAt: now.addingTimeInterval(-30 * 60), now: now) == .active,
+            "recently active task should stay in the active column"
+        )
+        expect(
+            TaskActivityClassifier.column(updatedAt: now.addingTimeInterval(-3 * 60 * 60), now: now) == .pending,
+            "older task should move to the pending column"
+        )
+        expect(
+            TaskActivityClassifier.column(updatedAt: nil, now: now) == .pending,
+            "task without activity time should remain pending"
+        )
+
         var reducer = TaskRuntimeReducer()
         reducer.replaceThreads([
             [
@@ -40,6 +53,44 @@ enum TaskRuntimeSelfTest {
         expect(snapshot.records["running-thread"]?.state == .running, "active without flags should map to running")
         expect(snapshot.records["record-thread"]?.state == .recorded, "notLoaded should remain recorded")
         expect(snapshot.records["record-thread"]?.isRealtime == false, "notLoaded should not be presented as realtime")
+
+        let recentItem = TaskItem(
+            id: "record-thread-active",
+            code: "COD-TEST",
+            title: "Recent task",
+            detail: "",
+            chip: "Active",
+            updatedAt: now,
+            tokens: nil,
+            kind: .active,
+            threadID: "record-thread"
+        )
+        let baseBoard = TaskBoard(refreshedAt: now, columns: [
+            TaskColumn(id: .active, title: "Active", count: 1, items: [recentItem]),
+            TaskColumn(id: .pending, title: "Pending", count: 0, items: []),
+            TaskColumn(id: .scheduled, title: "Scheduled", count: 0, items: []),
+            TaskColumn(id: .done, title: "Done", count: 0, items: [])
+        ])
+        let recordedSnapshot = CodexTaskLiveSnapshot(
+            connectionMode: .isolated,
+            records: [
+                "record-thread": TaskLiveRecord(
+                    threadID: "record-thread",
+                    name: nil,
+                    state: .recorded,
+                    updatedAt: now,
+                    turnID: nil,
+                    approval: nil,
+                    connectionMode: .isolated
+                )
+            ],
+            refreshedAt: now
+        )
+        let mergedBoard = baseBoard.merging(recordedSnapshot, now: now)
+        expect(
+            mergedBoard.columns.first(where: { $0.id == .active })?.items.contains(where: { $0.threadID == "record-thread" }) == true,
+            "notLoaded snapshot must not move a recently active task to pending"
+        )
 
         _ = reducer.applyNotification(method: "item/started", params: [
             "threadId": "approval-thread",

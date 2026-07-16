@@ -2460,7 +2460,7 @@ final class CodexUsageReader {
         let calendar = context.statistics.calendar
         let now = context.now
         let dayStart = calendar.startOfDay(for: now)
-        let activeItems: [TaskItem] = []
+        var activeItems: [TaskItem] = []
         var pendingItems: [TaskItem] = []
         var doneItems: [TaskItem] = []
 
@@ -2496,11 +2496,13 @@ final class CodexUsageReader {
             let todayThreads = runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: todayThreadsQuery)
             for object in todayThreads {
                 let updatedAt = dateFromEpoch(object["recencyAt"]) ?? dateFromEpoch(object["updatedAt"])
-                // Recency is not a runtime signal. Stored threads stay in the
-                // pending/recorded column until app-server supplies live state.
-                let kind: TaskColumnKind = .pending
+                let kind = TaskActivityClassifier.column(updatedAt: updatedAt, now: now)
                 let item = makeThreadTaskItem(object: object, updatedAt: updatedAt, kind: kind)
-                pendingItems.append(item)
+                if kind == .active {
+                    activeItems.append(item)
+                } else {
+                    pendingItems.append(item)
+                }
             }
 
             doneItems = runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: archivedTodayQuery).map { object in

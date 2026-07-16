@@ -56,10 +56,8 @@ final class CodexAppServerTaskClient: CodexTaskEventClient {
             }
 
             let sharedDaemonAvailable = self.fileManager.fileExists(atPath: self.defaultDaemonSocket.path)
-            if reason == .startup && !sharedDaemonAvailable {
-                return
-            }
-            self.launch(mode: sharedDaemonAvailable ? .sharedDaemon : .isolated)
+            guard sharedDaemonAvailable else { return }
+            self.launch(mode: .sharedDaemon)
         }
     }
 

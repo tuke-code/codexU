@@ -42,6 +42,15 @@ enum TaskConnectionMode: String, Equatable {
     case isolated
 }
 
+enum TaskActivityClassifier {
+    static let activeWindow: TimeInterval = 2 * 60 * 60
+
+    static func column(updatedAt: Date?, now: Date) -> TaskColumnKind {
+        guard let updatedAt else { return .pending }
+        return updatedAt >= now.addingTimeInterval(-activeWindow) ? .active : .pending
+    }
+}
+
 enum CodexRequestID: Equatable {
     case string(String)
     case integer(Int64)
@@ -609,10 +618,10 @@ extension TaskBoard {
             }
         }
 
-        for record in live.records.values {
+        for record in live.records.values where record.isRealtime {
             if let existing = itemsByThread[record.threadID] {
                 itemsByThread[record.threadID] = existing.applying(record)
-            } else if record.isRealtime, Calendar.current.isDate(record.updatedAt ?? now, inSameDayAs: now) {
+            } else if Calendar.current.isDate(record.updatedAt ?? now, inSameDayAs: now) {
                 let compactID = record.threadID.replacingOccurrences(of: "-", with: "")
                 let item = TaskItem(
                     id: "live-\(record.threadID)",
