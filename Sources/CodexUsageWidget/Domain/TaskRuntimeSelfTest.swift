@@ -149,7 +149,10 @@ enum TaskRuntimeSelfTest {
             updatedAt: now,
             tokens: nil,
             kind: .active,
-            threadID: "record-thread"
+            threadID: "record-thread",
+            sourceKind: .codexThread,
+            displayState: .recentlyActive,
+            stateBasis: .activityWindow
         )
         let baseBoard = TaskBoard(refreshedAt: now, columns: [
             TaskColumn(id: .active, title: "Active", count: 1, items: [recentItem]),

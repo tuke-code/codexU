@@ -271,6 +271,11 @@ struct TaskItem: Identifiable, Equatable {
     let threadID: String?
     let runtimeState: TaskRuntimeState
     let isRealtime: Bool
+    let sourceKind: TaskSourceKind
+    let displayState: TaskDisplayState
+    let stateBasis: TaskStateBasis
+    let rawStatus: String?
+    let nextRunAt: Date?
 
     init(
         id: String,
@@ -283,7 +288,12 @@ struct TaskItem: Identifiable, Equatable {
         kind: TaskColumnKind,
         threadID: String? = nil,
         runtimeState: TaskRuntimeState = .recorded,
-        isRealtime: Bool = false
+        isRealtime: Bool = false,
+        sourceKind: TaskSourceKind,
+        displayState: TaskDisplayState,
+        stateBasis: TaskStateBasis,
+        rawStatus: String? = nil,
+        nextRunAt: Date? = nil
     ) {
         self.id = id
         self.code = code
@@ -296,6 +306,11 @@ struct TaskItem: Identifiable, Equatable {
         self.threadID = threadID
         self.runtimeState = runtimeState
         self.isRealtime = isRealtime
+        self.sourceKind = sourceKind
+        self.displayState = displayState
+        self.stateBasis = stateBasis
+        self.rawStatus = rawStatus
+        self.nextRunAt = nextRunAt
     }
 }
 
@@ -2490,9 +2505,14 @@ final class CodexUsageReader {
             let todayThreads = runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: todayThreadsQuery)
             for object in todayThreads {
                 let updatedAt = dateFromEpoch(object["recencyAt"]) ?? dateFromEpoch(object["updatedAt"])
-                let kind = TaskActivityClassifier.column(updatedAt: updatedAt, now: now)
-                let item = makeThreadTaskItem(object: object, updatedAt: updatedAt, kind: kind)
-                if kind == .active {
+                let classification = TaskSourceClassifier.codexThread(updatedAt: updatedAt, now: now)
+                let item = makeThreadTaskItem(
+                    object: object,
+                    updatedAt: updatedAt,
+                    kind: classification.columnKind,
+                    displayState: classification.displayState
+                )
+                if classification.columnKind == .active {
                     activeItems.append(item)
                 } else {
                     pendingItems.append(item)
@@ -2500,61 +2520,61 @@ final class CodexUsageReader {
             }
 
             doneItems = runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: archivedTodayQuery).map { object in
-                makeThreadTaskItem(object: object, updatedAt: dateFromEpoch(object["updatedAt"]), kind: .done)
+                makeThreadTaskItem(
+                    object: object,
+                    updatedAt: dateFromEpoch(object["updatedAt"]),
+                    kind: .done,
+                    displayState: .archived
+                )
             }
         } else {
             messages.append("任务看板未找到 SQLite 数据源")
         }
 
-        let scheduledItems = readAutomationTasks()
+        activeItems = sortedTaskItems(activeItems)
+        pendingItems = sortedTaskItems(pendingItems)
+        doneItems = sortedTaskItems(doneItems)
+        let scheduledItems = readAutomationTasks(now: now)
 
-        return TaskBoard(refreshedAt: Date(), columns: [
-            TaskColumn(id: .active, title: "进行中", count: activeItems.count, items: activeItems),
-            TaskColumn(id: .pending, title: "待处理", count: pendingItems.count, items: pendingItems),
+        return TaskBoard(refreshedAt: now, columns: [
+            TaskColumn(id: .active, title: "最近活跃", count: activeItems.count, items: activeItems),
+            TaskColumn(id: .pending, title: "待继续", count: pendingItems.count, items: pendingItems),
             TaskColumn(id: .scheduled, title: "定时", count: scheduledItems.count, items: scheduledItems),
-            TaskColumn(id: .done, title: "完成", count: doneItems.count, items: doneItems)
+            TaskColumn(id: .done, title: "今日归档", count: doneItems.count, items: doneItems)
         ])
     }
 
-    private func makeThreadTaskItem(object: [String: Any], updatedAt: Date?, kind: TaskColumnKind) -> TaskItem {
+    private func makeThreadTaskItem(
+        object: [String: Any],
+        updatedAt: Date?,
+        kind: TaskColumnKind,
+        displayState: TaskDisplayState
+    ) -> TaskItem {
         let rawId = object["id"] as? String ?? UUID().uuidString
         let title = normalizedTitle(object["title"] as? String, fallback: object["preview"] as? String)
         let cwd = object["cwd"] as? String ?? ""
-        let tokens = int64Value(object["tokens"]) ?? 0
+        let tokens = int64Value(object["tokens"]).flatMap { $0 > 0 ? $0 : nil }
         let compactId = rawId.replacingOccurrences(of: "-", with: "")
         let code = "COD-" + compactId.suffix(4).uppercased()
-        let chip: String
-
-        switch kind {
-        case .active:
-            chip = tokens >= 5_000_000 ? "High" : "Active"
-        case .pending:
-            chip = tokens >= 2_000_000 ? "Medium" : "Idle"
-        case .scheduled:
-            chip = "Cron"
-        case .done:
-            chip = "Done"
-        }
-
-        let detailParts = [
-            shortWorkspaceName(cwd),
-            tokens > 0 ? formatTokens(tokens) : nil
-        ].compactMap { $0 }.filter { !$0.isEmpty }
+        let chip = displayState.rawValue
 
         return TaskItem(
             id: rawId + kind.rawValue,
             code: String(code),
             title: title,
-            detail: detailParts.joined(separator: " · "),
+            detail: shortWorkspaceName(cwd),
             chip: chip,
             updatedAt: updatedAt,
             tokens: tokens,
             kind: kind,
-            threadID: rawId
+            threadID: rawId,
+            sourceKind: .codexThread,
+            displayState: displayState,
+            stateBasis: kind == .done ? .archive : .activityWindow
         )
     }
 
-    private func readAutomationTasks() -> [TaskItem] {
+    private func readAutomationTasks(now: Date) -> [TaskItem] {
         let root = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex/automations")
         guard let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: nil) else {
             return []
@@ -2569,22 +2589,52 @@ final class CodexUsageReader {
             let id = fields["id"] ?? url.deletingLastPathComponent().lastPathComponent
             let name = fields["name"] ?? id
             let kind = fields["kind"] ?? "cron"
-            let schedule = scheduleSummary(fields["rrule"])
-            let detail = [kind.uppercased(), schedule].filter { !$0.isEmpty }.joined(separator: " · ")
+            let schedule = TaskScheduleParser.presentation(rrule: fields["rrule"], now: now)
 
             items.append(TaskItem(
                 id: "automation-" + id,
                 code: "AUTO-" + id.prefix(4).uppercased(),
                 title: name,
-                detail: detail,
+                detail: schedule.summary,
                 chip: kind == "heartbeat" ? "Wake" : "Cron",
-                updatedAt: dateFromEpoch(fields["updated_at"]),
+                updatedAt: nil,
                 tokens: nil,
-                kind: .scheduled
+                kind: .scheduled,
+                sourceKind: .codexAutomation,
+                displayState: .scheduled,
+                stateBasis: .scheduleConfig,
+                nextRunAt: schedule.nextRunAt
             ))
         }
 
-        return items.sorted { $0.title < $1.title }
+        return items.sorted { lhs, rhs in
+            switch (lhs.nextRunAt, rhs.nextRunAt) {
+            case let (left?, right?) where left != right:
+                return left < right
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                if lhs.title != rhs.title { return lhs.title < rhs.title }
+                return lhs.id < rhs.id
+            }
+        }
+    }
+
+    private func sortedTaskItems(_ items: [TaskItem]) -> [TaskItem] {
+        items.sorted { lhs, rhs in
+            switch (lhs.updatedAt, rhs.updatedAt) {
+            case let (left?, right?) where left != right:
+                return left > right
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                return lhs.id < rhs.id
+            }
+        }
     }
 
     private func runSQLiteJSON(sqlitePath: String, dbPath: String, query: String) -> [[String: Any]] {
@@ -3054,30 +3104,6 @@ private func relativeTimeText(_ date: Date, language: WidgetLanguage) -> String 
     let hours = minutes / 60
     if hours < 24 { return language.text("\(hours) 小时前", "\(hours)h ago") }
     return language.text("\(hours / 24) 天前", "\(hours / 24)d ago")
-}
-
-private func scheduleSummary(_ rrule: String?) -> String {
-    guard let rrule, !rrule.isEmpty else { return "" }
-
-    var timeText = ""
-    if let range = rrule.range(of: #"T(\d{2})(\d{2})(\d{2})"#, options: .regularExpression) {
-        let match = String(rrule[range])
-        let start = match.index(after: match.startIndex)
-        let hourEnd = match.index(start, offsetBy: 2)
-        let minuteEnd = match.index(hourEnd, offsetBy: 2)
-        timeText = "\(match[start..<hourEnd]):\(match[hourEnd..<minuteEnd])"
-    }
-
-    if rrule.contains("FREQ=DAILY") {
-        return timeText.isEmpty ? "每天" : "每天 \(timeText)"
-    }
-    if rrule.contains("FREQ=WEEKLY") {
-        return timeText.isEmpty ? "每周" : "每周 \(timeText)"
-    }
-    if rrule.contains("FREQ=HOURLY") {
-        return "每小时"
-    }
-    return timeText
 }
 
 private func intValue(_ value: Any?) -> Int? {
@@ -9389,6 +9415,11 @@ private func dumpJSON(_ snapshot: UsageSnapshot) {
                             "title": item.title,
                             "detail": item.detail,
                             "chip": item.chip,
+                            "sourceKind": item.sourceKind.rawValue,
+                            "displayState": item.displayState.rawValue,
+                            "stateBasis": item.stateBasis.rawValue,
+                            "rawStatus": jsonValue(item.rawStatus),
+                            "nextRunAt": jsonValue(isoString(item.nextRunAt)),
                             "updatedAt": jsonValue(isoString(item.updatedAt)),
                             "tokens": jsonValue(item.tokens)
                         ] as [String: Any]

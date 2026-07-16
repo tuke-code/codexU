@@ -756,8 +756,8 @@ private final class ClaudeCodeTaskReader {
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
-        let status = claudeStringValue(object["status"]) ?? "pending"
-        let kind = taskKind(for: status)
+        let status = claudeStringValue(object["status"])
+        let classification = TaskSourceClassifier.claudeTask(rawStatus: status)
         let title = claudeStringValue(object["subject"])
             ?? claudeStringValue(object["title"])
             ?? url.deletingPathExtension().lastPathComponent
@@ -765,35 +765,54 @@ private final class ClaudeCodeTaskReader {
             ?? claudeDateValue(object["updated_at"])
             ?? (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
 
+        let project = ["project", "projectPath", "project_path", "cwd"]
+            .compactMap { claudeStringValue(object[$0]) }
+            .first
+            .map { URL(fileURLWithPath: $0).lastPathComponent }
+        let runtimeState: TaskRuntimeState
+        switch classification.displayState {
+        case .running:
+            runtimeState = .running
+        case .failed:
+            runtimeState = .failed
+        case .completed:
+            runtimeState = .completed
+        default:
+            runtimeState = .recorded
+        }
+
         return TaskItem(
             id: url.path,
-            code: status,
+            code: status ?? "unknown",
             title: title,
-            detail: "Claude Code task",
-            chip: status,
+            detail: project ?? "",
+            chip: classification.displayState.rawValue,
             updatedAt: updatedAt,
             tokens: nil,
-            kind: kind
+            kind: classification.columnKind,
+            runtimeState: runtimeState,
+            sourceKind: .claudeTask,
+            displayState: classification.displayState,
+            stateBasis: .explicit,
+            rawStatus: status
         )
-    }
-
-    private func taskKind(for status: String) -> TaskColumnKind {
-        switch status.lowercased() {
-        case "in_progress", "active", "running":
-            return .active
-        case "completed", "done", "success":
-            return .done
-        case "scheduled":
-            return .scheduled
-        default:
-            return .pending
-        }
     }
 
     private func makeColumn(_ kind: TaskColumnKind, title: String, items: [TaskItem]) -> TaskColumn {
         let columnItems = items
             .filter { $0.kind == kind }
-            .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
+            .sorted { lhs, rhs in
+                switch (lhs.updatedAt, rhs.updatedAt) {
+                case let (left?, right?) where left != right:
+                    return left > right
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                default:
+                    return lhs.id < rhs.id
+                }
+            }
         return TaskColumn(id: kind, title: title, count: columnItems.count, items: columnItems)
     }
 }

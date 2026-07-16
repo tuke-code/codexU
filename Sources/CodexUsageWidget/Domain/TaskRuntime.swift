@@ -556,8 +556,17 @@ enum TaskAttentionSelector {
 }
 
 extension TaskItem {
-    func applying(_ record: TaskLiveRecord) -> TaskItem {
-        TaskItem(
+    func applying(_ record: TaskLiveRecord, now: Date) -> TaskItem {
+        let presentation: TaskClassification
+        if displayState == .archived {
+            presentation = TaskClassification(columnKind: .done, displayState: .archived)
+        } else {
+            presentation = TaskSourceClassifier.codexThread(
+                updatedAt: record.updatedAt ?? updatedAt,
+                now: now
+            )
+        }
+        return TaskItem(
             id: id,
             code: code,
             title: title,
@@ -565,10 +574,15 @@ extension TaskItem {
             chip: chip,
             updatedAt: record.updatedAt ?? updatedAt,
             tokens: tokens,
-            kind: record.state.columnKind,
+            kind: presentation.columnKind,
             threadID: record.threadID,
             runtimeState: record.state,
-            isRealtime: record.isRealtime
+            isRealtime: record.isRealtime,
+            sourceKind: sourceKind,
+            displayState: presentation.displayState,
+            stateBasis: stateBasis,
+            rawStatus: rawStatus,
+            nextRunAt: nextRunAt
         )
     }
 }
@@ -590,7 +604,7 @@ extension TaskBoard {
 
         for record in live.records.values where record.isRealtime {
             if let existing = itemsByThread[record.threadID] {
-                itemsByThread[record.threadID] = existing.applying(record)
+                itemsByThread[record.threadID] = existing.applying(record, now: now)
             } else if Calendar.current.isDate(record.updatedAt ?? now, inSameDayAs: now) {
                 let compactID = record.threadID.replacingOccurrences(of: "-", with: "")
                 let item = TaskItem(
@@ -604,7 +618,10 @@ extension TaskBoard {
                     kind: record.state.columnKind,
                     threadID: record.threadID,
                     runtimeState: record.state,
-                    isRealtime: record.isRealtime
+                    isRealtime: record.isRealtime,
+                    sourceKind: .codexThread,
+                    displayState: .recentlyActive,
+                    stateBasis: .activityWindow
                 )
                 itemsByThread[record.threadID] = item
             }

@@ -173,6 +173,11 @@ private func runtimeJSONObject(_ taskBoard: TaskBoard) -> [String: Any] {
                         "chip": item.chip,
                         "runtimeState": item.runtimeState.rawValue,
                         "isRealtime": item.isRealtime,
+                        "sourceKind": item.sourceKind.rawValue,
+                        "displayState": item.displayState.rawValue,
+                        "stateBasis": item.stateBasis.rawValue,
+                        "rawStatus": runtimeJSONValue(item.rawStatus),
+                        "nextRunAt": runtimeJSONValue(runtimeISOString(item.nextRunAt)),
                         "updatedAt": runtimeJSONValue(runtimeISOString(item.updatedAt)),
                         "tokens": runtimeJSONValue(item.tokens)
                     ] as [String: Any]
