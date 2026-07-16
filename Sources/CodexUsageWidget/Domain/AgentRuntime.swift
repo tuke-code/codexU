@@ -63,16 +63,12 @@ struct RuntimeMenuSummary: Identifiable, Equatable {
     let fiveHourResetsAt: Date?
     let sevenDayRemainingPercent: Double?
     let sevenDayResetsAt: Date?
-    /// Duration of the secondary long-period window (7d or monthly).
-    let sevenDayWindowDurationMins: Int?
+    let monthlyRemainingPercent: Double?
+    let monthlyResetsAt: Date?
     let todayTokens: Int64?
     let sourceLabel: String
 
     var id: String { scope.runtimeId }
-
-    var secondaryQuotaIsMonthly: Bool {
-        CodexRateLimitNormalizer.isMonthlyDuration(sevenDayWindowDurationMins)
-    }
 }
 
 struct RuntimeUsageSnapshot: Identifiable, Equatable {
@@ -101,7 +97,8 @@ struct RuntimeUsageSnapshot: Identifiable, Equatable {
             fiveHourResetsAt: snapshot.fiveHourQuota?.resetsAt,
             sevenDayRemainingPercent: snapshot.sevenDayQuota?.remainingPercent,
             sevenDayResetsAt: snapshot.sevenDayQuota?.resetsAt,
-            sevenDayWindowDurationMins: snapshot.sevenDayQuota?.windowDurationMins,
+            monthlyRemainingPercent: snapshot.monthlyQuota?.remainingPercent,
+            monthlyResetsAt: snapshot.monthlyQuota?.resetsAt,
             todayTokens: todayTokens,
             sourceLabel: quotaSourceLabel
         )
@@ -129,7 +126,9 @@ enum RuntimeQuotaContinuity {
             guard !next.snapshot.quotaReadSucceeded,
                   let last = previousByScope[next.scope],
                   last.status == .available || last.status == .stale,
-                  last.snapshot.fiveHourQuota != nil || last.snapshot.sevenDayQuota != nil
+                  last.snapshot.fiveHourQuota != nil
+                    || last.snapshot.sevenDayQuota != nil
+                    || last.snapshot.monthlyQuota != nil
             else {
                 return next
             }
@@ -139,6 +138,8 @@ enum RuntimeQuotaContinuity {
                 snapshot: next.snapshot.replacingQuotaWindows(
                     fiveHourQuota: last.snapshot.fiveHourQuota,
                     sevenDayQuota: last.snapshot.sevenDayQuota,
+                    monthlyQuota: last.snapshot.monthlyQuota,
+                    credits: last.snapshot.credits,
                     quotaReadSucceeded: false
                 ),
                 status: .stale,

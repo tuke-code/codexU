@@ -8,10 +8,12 @@ struct CodexNormalizedRateWindows: Equatable {
     let fiveHourMatchCount: Int
     let sevenDayMatchCount: Int
     let monthlyMatchCount: Int
+}
 
-    /// Long-period secondary quota: prefer the explicit 7-day window, otherwise monthly.
-    var longPeriod: RateWindow? {
-        sevenDay ?? monthly
+enum CodexResetCreditNormalizer {
+    static func normalizeAvailableCount(_ value: Int?) -> Int? {
+        guard let value, value >= 0 else { return nil }
+        return value
     }
 }
 

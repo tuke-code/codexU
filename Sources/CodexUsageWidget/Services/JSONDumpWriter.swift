@@ -38,6 +38,11 @@ private func runtimeJSONObject(_ snapshot: UsageSnapshot) -> [String: Any] {
     var object = runtimeLegacyJSONObject(snapshot)
     object["refreshedAt"] = runtimeISOString(snapshot.refreshedAt) ?? ""
     object["quotaReadSucceeded"] = snapshot.quotaReadSucceeded
+    object["quotaWindows"] = [
+        "fiveHour": snapshot.fiveHourQuota.map(runtimeJSONObject) ?? NSNull(),
+        "sevenDay": snapshot.sevenDayQuota.map(runtimeJSONObject) ?? NSNull(),
+        "monthly": snapshot.monthlyQuota.map(runtimeJSONObject) ?? NSNull()
+    ] as [String: Any]
     object["messages"] = snapshot.messages
     return object
 }
@@ -57,7 +62,7 @@ private func runtimeLegacyJSONObject(_ snapshot: UsageSnapshot) -> [String: Any]
         object["primary"] = runtimeJSONObject(primary)
     }
 
-    if let secondary = snapshot.sevenDayQuota {
+    if let secondary = snapshot.sevenDayQuota ?? snapshot.monthlyQuota {
         object["secondary"] = runtimeJSONObject(secondary)
     }
 
@@ -66,7 +71,12 @@ private func runtimeLegacyJSONObject(_ snapshot: UsageSnapshot) -> [String: Any]
             "hasCredits": credits.hasCredits,
             "unlimited": credits.unlimited,
             "balance": runtimeJSONValue(credits.balance),
-            "resetCredits": runtimeJSONValue(credits.resetCredits)
+            "resetCredits": runtimeJSONValue(credits.resetCredits),
+            "resetCreditDetails": credits.resetCreditDetails.map { details in
+                details.map { detail in
+                    ["expiresAt": runtimeJSONValue(runtimeISOString(detail.expiresAt))]
+                }
+            } ?? NSNull()
         ] as [String: Any]
     }
 

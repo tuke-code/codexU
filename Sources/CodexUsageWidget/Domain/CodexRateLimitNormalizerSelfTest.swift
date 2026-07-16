@@ -10,6 +10,51 @@ enum CodexRateLimitNormalizerSelfTest {
             }
         }
 
+        expect(
+            CodexResetCreditNormalizer.normalizeAvailableCount(nil) == nil,
+            "missing reset-credit count should remain unsupported"
+        )
+        expect(
+            CodexResetCreditNormalizer.normalizeAvailableCount(-1) == nil,
+            "negative reset-credit count should be rejected"
+        )
+        expect(
+            CodexResetCreditNormalizer.normalizeAvailableCount(0) == 0,
+            "zero reset-credit count should remain distinct from unsupported"
+        )
+
+        let resetDetails = (0..<4).map { index in
+            ResetCreditDetail(
+                id: "reset-\(index)",
+                expiresAt: Date(timeIntervalSince1970: Double(1_800_000_000 + index))
+            )
+        }
+        let expandedResetDisclosure = ResetCreditDisclosure(
+            totalCount: 5,
+            details: resetDetails
+        )
+        expect(
+            expandedResetDisclosure.inlineDetails.count == 2,
+            "reset-credit inline disclosure should show at most two details"
+        )
+        expect(
+            expandedResetDisclosure.fullDetails.count == 4
+                && expandedResetDisclosure.hiddenCount == 3
+                && expandedResetDisclosure.missingDetailCount == 1
+                && expandedResetDisclosure.showsExpandedTooltip,
+            "reset-credit hover disclosure should retain all returned and missing details"
+        )
+        let compactResetDisclosure = ResetCreditDisclosure(
+            totalCount: 2,
+            details: Array(resetDetails.prefix(1))
+        )
+        expect(
+            compactResetDisclosure.inlineDetails.count == 1
+                && compactResetDisclosure.missingDetailCount == 1
+                && !compactResetDisclosure.showsExpandedTooltip,
+            "two or fewer reset credits should stay fully inline without a hover tooltip"
+        )
+
         let fiveHour = window(usedPercent: 12, durationMins: 300)
         let sevenDay = window(usedPercent: 34, durationMins: 10_080)
         let monthly = window(usedPercent: 56, durationMins: 43_800)
@@ -18,7 +63,6 @@ enum CodexRateLimitNormalizerSelfTest {
         expect(standard.fiveHour == fiveHour, "standard response should classify the 300-minute window as 5h")
         expect(standard.sevenDay == sevenDay, "standard response should classify the 10080-minute window as 7d")
         expect(standard.monthly == nil, "standard response must not invent a monthly window")
-        expect(standard.longPeriod == sevenDay, "standard long-period slot should prefer 7d")
         expect(
             CodexRateLimitNormalizer.isAuthoritative(
                 hasWindowFields: true,
@@ -52,7 +96,6 @@ enum CodexRateLimitNormalizerSelfTest {
         expect(teamMonthly.fiveHour == fiveHour, "team response should keep the 5h quota")
         expect(teamMonthly.sevenDay == nil, "team monthly window must not be labeled as 7d")
         expect(teamMonthly.monthly == monthly, "team 43800-minute window should classify as monthly")
-        expect(teamMonthly.longPeriod == monthly, "team long-period slot should surface monthly")
         expect(teamMonthly.unclassified.isEmpty, "known monthly durations must not remain unclassified")
         expect(
             CodexRateLimitNormalizer.isAuthoritative(
@@ -65,7 +108,6 @@ enum CodexRateLimitNormalizerSelfTest {
 
         let monthlyOnly = CodexRateLimitNormalizer.normalize([monthly, nil])
         expect(monthlyOnly.monthly == monthly, "monthly-only response should keep the monthly quota")
-        expect(monthlyOnly.longPeriod == monthly, "monthly-only long-period slot should surface monthly")
         expect(
             CodexRateLimitNormalizer.isAuthoritative(
                 hasWindowFields: true,
@@ -93,14 +135,13 @@ enum CodexRateLimitNormalizerSelfTest {
         let bothLong = CodexRateLimitNormalizer.normalize([sevenDay, monthly])
         expect(bothLong.sevenDay == sevenDay, "7d should remain classified beside monthly")
         expect(bothLong.monthly == monthly, "monthly should remain classified beside 7d")
-        expect(bothLong.longPeriod == sevenDay, "when both long windows exist, prefer 7d for the secondary slot")
         expect(
             CodexRateLimitNormalizer.isAuthoritative(
                 hasWindowFields: true,
                 hasMalformedWindow: false,
                 normalized: bothLong
             ),
-            "7d + monthly without unknowns remains authoritative"
+            "7d + monthly remains authoritative when both windows are preserved"
         )
 
         let other = window(usedPercent: 56, durationMins: 1_440)
@@ -160,13 +201,15 @@ enum CodexRateLimitNormalizerSelfTest {
             status: .available,
             quotaReadSucceeded: true,
             fiveHour: nil,
-            sevenDay: sevenDay
+            sevenDay: sevenDay,
+            monthly: nil
         )
         let failedRefresh = runtime(
             status: .localOnly,
             quotaReadSucceeded: false,
             fiveHour: nil,
-            sevenDay: nil
+            sevenDay: nil,
+            monthly: nil
         )
         let retained = RuntimeQuotaContinuity.reconcile(
             previous: [weeklyRuntime],
@@ -188,13 +231,15 @@ enum CodexRateLimitNormalizerSelfTest {
             status: .available,
             quotaReadSucceeded: true,
             fiveHour: fiveHour,
-            sevenDay: sevenDay
+            sevenDay: sevenDay,
+            monthly: nil
         )
         let partiallyParsedRefresh = runtime(
             status: .localOnly,
             quotaReadSucceeded: false,
             fiveHour: nil,
-            sevenDay: sevenDay
+            sevenDay: sevenDay,
+            monthly: nil
         )
         let retainedDual = RuntimeQuotaContinuity.reconcile(
             previous: [dualRuntime],
@@ -211,7 +256,8 @@ enum CodexRateLimitNormalizerSelfTest {
             status: .available,
             quotaReadSucceeded: true,
             fiveHour: fiveHour,
-            sevenDay: monthly
+            sevenDay: nil,
+            monthly: monthly
         )
         let retainedMonthly = RuntimeQuotaContinuity.reconcile(
             previous: [monthlyRuntime],
@@ -219,15 +265,34 @@ enum CodexRateLimitNormalizerSelfTest {
         )[0]
         expect(
             retainedMonthly.snapshot.fiveHourQuota == fiveHour
-                && retainedMonthly.snapshot.sevenDayQuota == monthly,
-            "a failed refresh must retain the last confirmed monthly long-period quota"
+                && retainedMonthly.snapshot.sevenDayQuota == nil
+                && retainedMonthly.snapshot.monthlyQuota == monthly,
+            "a failed refresh must retain monthly quota in its own domain slot"
+        )
+
+        let bothLongRuntime = runtime(
+            status: .available,
+            quotaReadSucceeded: true,
+            fiveHour: nil,
+            sevenDay: sevenDay,
+            monthly: monthly
+        )
+        let retainedBothLong = RuntimeQuotaContinuity.reconcile(
+            previous: [bothLongRuntime],
+            incoming: [failedRefresh]
+        )[0]
+        expect(
+            retainedBothLong.snapshot.sevenDayQuota == sevenDay
+                && retainedBothLong.snapshot.monthlyQuota == monthly,
+            "a failed refresh must retain simultaneous 7d and monthly windows"
         )
 
         let authoritativeNoLimit = runtime(
             status: .available,
             quotaReadSucceeded: true,
             fiveHour: nil,
-            sevenDay: nil
+            sevenDay: nil,
+            monthly: nil
         )
         let cleared = RuntimeQuotaContinuity.reconcile(
             previous: [weeklyRuntime],
@@ -235,7 +300,9 @@ enum CodexRateLimitNormalizerSelfTest {
         )[0]
         expect(cleared.status == .available, "a successful zero-limit response should stay authoritative")
         expect(
-            cleared.snapshot.fiveHourQuota == nil && cleared.snapshot.sevenDayQuota == nil,
+            cleared.snapshot.fiveHourQuota == nil
+                && cleared.snapshot.sevenDayQuota == nil
+                && cleared.snapshot.monthlyQuota == nil,
             "a successful zero-limit response must clear the previous topology"
         )
 
@@ -262,7 +329,8 @@ enum CodexRateLimitNormalizerSelfTest {
         status: RuntimeMenuStatus,
         quotaReadSucceeded: Bool,
         fiveHour: RateWindow?,
-        sevenDay: RateWindow?
+        sevenDay: RateWindow?,
+        monthly: RateWindow?
     ) -> RuntimeUsageSnapshot {
         RuntimeUsageSnapshot(
             scope: .codex,
@@ -274,6 +342,7 @@ enum CodexRateLimitNormalizerSelfTest {
                 quotaReadSucceeded: quotaReadSucceeded,
                 fiveHourQuota: fiveHour,
                 sevenDayQuota: sevenDay,
+                monthlyQuota: monthly,
                 credits: nil,
                 cloudLifetimeTokens: nil,
                 local: nil,
