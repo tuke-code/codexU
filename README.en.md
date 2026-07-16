@@ -37,7 +37,7 @@ codexU is a macOS menu bar and desktop app for tracking OpenAI Codex / ChatGPT C
 - Shows a six-month daily token heatmap, a last-7-day trend summary, and previous-period comparison.
 - Shows recent and all-time project rankings with tokens, estimated value, thread counts, and recent activity.
 - Shows top tool calls and top Skill usage to explain the structure of local Codex work.
-- Runs as a standard macOS window with Dock, system window controls, minimization, and optional background running after the main window is closed. Closing the main window hides the Dock icon and keeps the menu bar item.
+- Runs as a standard macOS window with a compact default layout, resizing from 820 to 1280 points without changing card order or information structure, and restoration of the previous window size. It supports Dock, system window controls, minimization, and optional background running after the main window is closed; closing the main window hides the Dock icon and keeps the menu bar item.
 - Uses `Command + U` by default to show or hide the main window, and the shortcut can be customized in Settings. The menu bar runtime menu can also open the main window, open settings, or quit.
 - Includes a Settings window for Chinese/English UI text, system/light/dark appearance, menu bar content with live preview, always-on-top behavior, close-window behavior, system status, and update check configuration.
 - Checks GitHub Releases for newer versions by default, including beta releases, and offers the DMG that matches the current Mac architecture. It does not silently download or install updates, and automatic checks can be turned off.
@@ -150,7 +150,7 @@ For Developer ID signing and notarization, see [DISTRIBUTION.md](DISTRIBUTION.md
 - Tool and Skill usage: tool call and Skill load records parsed from local session events.
 - Scheduled tasks: enabled automation metadata under `~/.codex/automations/**/automation.toml`. The next run is computed locally only when cadence, timezone, and time are sufficiently explicit.
 - Claude Code historical tokens: assistant `message.usage` fields in `~/.claude/projects/**/*.jsonl`.
-- Claude Code tools, Skills, and tasks: transcript `tool_use.name` / explicit Skill attribution, plus `~/.claude/tasks/**/*.json`.
+- Claude Code tools, Skills, and tasks: transcript `tool_use.name` / explicit Skill attribution, plus `~/.claude/tasks/**/*.json`. When a Skill path is absent, codexU infers it from Claude Code's current personal, project, nested, plugin, and legacy-command locations; unresolved history is shown as “not located.”
 - Claude Code active quota: optional `~/Library/Caches/codexU/claude-code/statusline-snapshot.json`; without it, 5-hour and 7-day quota show `--`.
 - Update checks: default access to the GitHub Releases API for public `shanggqm/codexU` release metadata, cached in `~/Library/Caches/codexU/update-check.json`.
 

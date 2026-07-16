@@ -41,7 +41,7 @@ enum CodexRateLimitNormalizerSelfTest {
             expandedResetDisclosure.fullDetails.count == 4
                 && expandedResetDisclosure.hiddenCount == 3
                 && expandedResetDisclosure.missingDetailCount == 1
-                && expandedResetDisclosure.showsExpandedTooltip,
+                && expandedResetDisclosure.showsHoverTooltip,
             "reset-credit hover disclosure should retain all returned and missing details"
         )
         let compactResetDisclosure = ResetCreditDisclosure(
@@ -51,8 +51,8 @@ enum CodexRateLimitNormalizerSelfTest {
         expect(
             compactResetDisclosure.inlineDetails.count == 1
                 && compactResetDisclosure.missingDetailCount == 1
-                && !compactResetDisclosure.showsExpandedTooltip,
-            "two or fewer reset credits should stay fully inline without a hover tooltip"
+                && compactResetDisclosure.showsHoverTooltip,
+            "two or fewer reset credits should stay inline and expose the returned details on hover"
         )
 
         let fiveHour = window(usedPercent: 12, durationMins: 300)

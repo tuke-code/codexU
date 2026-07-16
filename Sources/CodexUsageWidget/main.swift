@@ -48,8 +48,8 @@ struct ResetCreditDisclosure: Equatable {
         max(0, totalCount - fullDetails.count)
     }
 
-    var showsExpandedTooltip: Bool {
-        totalCount > Self.inlineDetailLimit
+    var showsHoverTooltip: Bool {
+        !inlineDetails.isEmpty
     }
 }
 
@@ -2992,7 +2992,7 @@ private func displayHomePath(_ path: String) -> String {
     return path
 }
 
-private func estimateStaticTokens(_ text: String) -> Int64 {
+func estimateStaticTokens(_ text: String) -> Int64 {
     let scalars = Array(text.unicodeScalars)
     guard !scalars.isEmpty else { return 0 }
 
@@ -3523,10 +3523,11 @@ struct UsageWidgetView: View {
     @State private var selectedDashboardTab: DashboardTab = .tasks
     @State private var focusedThreadID: String?
 
-    static let widgetWidth: CGFloat = 820
+    static let widgetDefaultWidth: CGFloat = 820
+    static let widgetMinWidth: CGFloat = 820
+    static let widgetMaxWidth: CGFloat = 1280
     static let widgetDefaultHeight: CGFloat = 720
     static let widgetMinHeight: CGFloat = 620
-    static let widgetMaxHeight: CGFloat = 920
     static let windowCornerRadius: CGFloat = 18
 
     private var snapshot: UsageSnapshot { store.snapshot }
@@ -3546,8 +3547,13 @@ struct UsageWidgetView: View {
                 .accessibilityHidden(true)
             widgetContent
         }
-        .frame(width: Self.widgetWidth, alignment: .topLeading)
-        .frame(minHeight: Self.widgetMinHeight, maxHeight: .infinity, alignment: .topLeading)
+        .frame(
+            minWidth: Self.widgetMinWidth,
+            maxWidth: Self.widgetMaxWidth,
+            minHeight: Self.widgetMinHeight,
+            maxHeight: .infinity,
+            alignment: .topLeading
+        )
         .appVisualEnvironment(
             catalog: settings.paletteCatalog,
             paletteID: settings.paletteID,
@@ -3697,6 +3703,7 @@ struct UsageWidgetView: View {
                     .frame(width: 154)
                 }
             }
+            .zIndex(1)
 
             VStack(alignment: .leading, spacing: 13) {
                 HStack(spacing: 12) {
@@ -6482,7 +6489,12 @@ private struct ResetCreditAvailability: View {
     let details: [ResetCreditDetail]?
     let language: WidgetLanguage
     @Environment(\.visualTokens) private var visualTokens
-    @State private var isHovering = false
+    @State private var isHoveringInlineDetails = false
+    @State private var inlineDetailsHoverLocation: CGPoint?
+
+    private var effectiveTooltipLocation: CGPoint {
+        inlineDetailsHoverLocation ?? CGPoint(x: 142, y: 4)
+    }
 
     private var disclosure: ResetCreditDisclosure {
         ResetCreditDisclosure(totalCount: count, details: details ?? [])
@@ -6504,30 +6516,48 @@ private struct ResetCreditAvailability: View {
                     .foregroundStyle(.primary)
             }
 
-            ForEach(Array(disclosure.inlineDetails.enumerated()), id: \.element.id) { index, detail in
-                HStack(spacing: 5) {
-                    Text(language.text("第 \(index + 1) 次", "Reset \(index + 1)"))
-                        .font(.system(size: 8.5, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 4)
-                    Text(expirationText(detail.expiresAt))
-                        .font(.system(size: 8.5, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+            if !disclosure.inlineDetails.isEmpty {
+                VStack(spacing: 4) {
+                    ForEach(Array(disclosure.inlineDetails.enumerated()), id: \.element.id) { index, detail in
+                        HStack(spacing: 5) {
+                            Text(language.text("第 \(index + 1) 次", "Reset \(index + 1)"))
+                                .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 4)
+                            Text(expirationText(detail.expiresAt))
+                                .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
                 }
-            }
-
-            if disclosure.showsExpandedTooltip {
-                HStack(spacing: 4) {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 8, weight: .semibold))
-                    Text(expandedTooltipHint)
+                .contentShape(Rectangle())
+                .onHover { hovering in
+                    isHoveringInlineDetails = hovering
+                    if !hovering {
+                        inlineDetailsHoverLocation = nil
+                    }
                 }
-                    .font(.system(size: 8.2, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else if disclosure.missingDetailCount > 0 {
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let location):
+                        isHoveringInlineDetails = true
+                        inlineDetailsHoverLocation = location
+                    case .ended:
+                        inlineDetailsHoverLocation = nil
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if isHoveringInlineDetails, disclosure.showsHoverTooltip {
+                        ChartTooltipView(payload: tooltipPayload, prefersOpaqueSurface: true)
+                            .frame(width: chartTooltipWidth)
+                            .offset(x: effectiveTooltipLocation.x + 12, y: effectiveTooltipLocation.y + 10)
+                            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                            .zIndex(20)
+                    }
+                }
+            } else if !disclosure.showsHoverTooltip, disclosure.missingDetailCount > 0 {
                 Text(language.text(
                     "另有 \(disclosure.missingDetailCount) 次未提供到期时间",
                     "\(disclosure.missingDetailCount) expiry times unavailable"
@@ -6539,18 +6569,11 @@ private struct ResetCreditAvailability: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
-        .overlay(alignment: .topLeading) {
-            if isHovering, disclosure.showsExpandedTooltip {
-                ChartTooltipView(payload: tooltipPayload)
-                    .frame(width: chartTooltipWidth)
-                    .offset(x: 160, y: -4)
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                    .zIndex(20)
-            }
+        .zIndex(isHoveringInlineDetails ? 20 : 0)
+        .onDisappear {
+            isHoveringInlineDetails = false
+            inlineDetailsHoverLocation = nil
         }
-        .zIndex(isHovering ? 20 : 0)
         .accessibilityElement(children: .combine)
     }
 
@@ -6572,19 +6595,6 @@ private struct ResetCreditAvailability: View {
         return ChartTooltipPayload(
             title: language.text("可用重置次数 \(count)", "\(count) available resets"),
             rows: rows
-        )
-    }
-
-    private var expandedTooltipHint: String {
-        if disclosure.inlineDetails.isEmpty {
-            return language.text(
-                "\(disclosure.hiddenCount) 次 · 悬停查看",
-                "\(disclosure.hiddenCount) resets · hover"
-            )
-        }
-        return language.text(
-            "其余 \(disclosure.hiddenCount) 次 · 悬停查看",
-            "\(disclosure.hiddenCount) more · hover"
         )
     }
 
@@ -7061,6 +7071,7 @@ struct ChartTooltipPayload: Equatable {
 struct ChartTooltipView: View {
     @Environment(\.colorScheme) private var colorScheme
     let payload: ChartTooltipPayload
+    var prefersOpaqueSurface = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -7090,7 +7101,11 @@ struct ChartTooltipView: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(FixedVisualPalette.cardFill(colorScheme, elevated: true))
+                .fill(
+                    prefersOpaqueSurface
+                        ? FixedVisualPalette.tooltipFill(colorScheme)
+                        : FixedVisualPalette.cardFill(colorScheme, elevated: true)
+                )
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .strokeBorder(FixedVisualPalette.cardStroke(colorScheme, elevated: true), lineWidth: 0.9)
@@ -8206,17 +8221,22 @@ struct SkillUsageRow: View {
 
     private var staticTokenText: String {
         guard let tokens = skill.staticTokenEstimate else {
-            return language.text("文件缺失", "missing file")
+            return language.text("当前未定位", "not located")
         }
         return language.text("Skill.md \(formatTokens(tokens))", "Skill.md \(formatTokens(tokens))")
     }
 
     private var skillHelpText: String {
-        let staticTokens = skill.staticTokenEstimate.map { formatTokens($0) } ?? "--"
+        guard let staticTokenEstimate = skill.staticTokenEstimate else {
+            return language.text(
+                "\(skill.name) · \(skill.loadCount) 次加载 · \(skill.threadCount) 线程 · Skill.md 当前未定位",
+                "\(skill.name) · \(skill.loadCount)x loads · \(skill.threadCount) threads · Skill.md not currently located"
+            )
+        }
         let size = formatBytes(skill.staticByteCount)
         return language.text(
-            "\(skill.name) · \(skill.loadCount) 次加载 · \(skill.threadCount) 线程 · Skill.md Token数 \(staticTokens) · 文件 \(size) · \(displayHomePath(skill.path))",
-            "\(skill.name) · \(skill.loadCount)x loads · \(skill.threadCount) threads · Skill.md tokens \(staticTokens) · file \(size) · \(displayHomePath(skill.path))"
+            "\(skill.name) · \(skill.loadCount) 次加载 · \(skill.threadCount) 线程 · Skill.md Token数 \(formatTokens(staticTokenEstimate)) · 当前文件 \(size) · \(displayHomePath(skill.path))",
+            "\(skill.name) · \(skill.loadCount)x loads · \(skill.threadCount) threads · Skill.md tokens \(formatTokens(staticTokenEstimate)) · current file \(size) · \(displayHomePath(skill.path))"
         )
     }
 }
@@ -8705,6 +8725,12 @@ enum FixedVisualPalette {
             return Color.white.opacity(elevated ? 0.110 : 0.080)
         }
         return Color.white.opacity(elevated ? 0.680 : 0.520)
+    }
+
+    static func tooltipFill(_ colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color.black.opacity(0.41)
+            : Color.white.opacity(0.46)
     }
 
     static func cardStroke(
@@ -9738,7 +9764,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     }
 
     private func createMainWindow() {
-        let width = UsageWidgetView.widgetWidth
+        let width = UsageWidgetView.widgetDefaultWidth
         let height = UsageWidgetView.widgetDefaultHeight
         let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let origin = CGPoint(
@@ -9748,8 +9774,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
         let mainWindow = MainAppWindow(contentRect: NSRect(origin: origin, size: CGSize(width: width, height: height)))
         mainWindow.delegate = self
-        mainWindow.minSize = CGSize(width: UsageWidgetView.widgetWidth, height: UsageWidgetView.widgetMinHeight)
-        mainWindow.maxSize = CGSize(width: UsageWidgetView.widgetWidth, height: UsageWidgetView.widgetMaxHeight)
+        mainWindow.minSize = CGSize(width: UsageWidgetView.widgetMinWidth, height: UsageWidgetView.widgetMinHeight)
+        mainWindow.maxSize = CGSize(width: UsageWidgetView.widgetMaxWidth, height: .greatestFiniteMagnitude)
         mainWindow.contentMinSize = mainWindow.minSize
         mainWindow.contentMaxSize = mainWindow.maxSize
         mainWindow.contentView = GlassHostingContainer(
@@ -9761,6 +9787,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             cornerRadius: UsageWidgetView.windowCornerRadius
         )
         installTitlebarToolbar(on: mainWindow)
+        _ = mainWindow.setFrameAutosaveName("codexU.mainWindow")
         window = mainWindow
         applyMainWindowLevel()
         showMainWindow()
@@ -9776,7 +9803,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
                 }
             )
         )
-        toolbarView.frame = NSRect(x: 0, y: 0, width: UsageWidgetView.widgetWidth - 24, height: 44)
+        toolbarView.frame = NSRect(x: 0, y: 0, width: UsageWidgetView.widgetDefaultWidth - 24, height: 44)
 
         let controller = NSTitlebarAccessoryViewController()
         controller.layoutAttribute = .right
@@ -10578,6 +10605,10 @@ struct codexUMain {
 
         if CommandLine.arguments.contains("--self-test-task-runtime") {
             exit(TaskRuntimeSelfTest.run() ? 0 : 1)
+        }
+
+        if CommandLine.arguments.contains("--self-test-claude-skill-paths") {
+            exit(ClaudeSkillPathResolverSelfTest.run() ? 0 : 1)
         }
 
         if CommandLine.arguments.contains("--self-test-codex-session-link") {
