@@ -52,10 +52,12 @@ Do not accept the PASS line without reviewing the generated global inventory. In
 - `Timer`, notification/KVO observers, event monitors, and Combine subscriptions: weak captures and matching invalidation/removal/cancellation.
 - buffers, caches, samples, pending request maps, and static mutable collections: byte/count limits, eviction, timeout, and working-set release.
 - `Data(contentsOf:)` and transcript/session readers: trusted input boundaries, file-size checks, streaming behavior, and oversized-record handling.
+- recursive and parent-path traversal: explicit root/base termination, visited-node/path cycle guards, and regression coverage for platform-specific Foundation behavior.
 
 If a reviewer finds a plausible unbounded growth path that the script does not catch, stop the release, fix the risk, and extend `scripts/check-memory-risks.sh` so the same class of regression becomes automatically blocking.
 
 `make release-package` and `make release-check` rerun this gate. Do not bypass the repository wrappers by calling packaging scripts or lower-level release targets directly.
+The release package must also run the Claude Skill path resolver self-test so the macOS 13 root-parent regression is exercised before artifacts are produced.
 
 ## Versioning
 

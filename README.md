@@ -1,7 +1,7 @@
 # codexU
 
 > [!IMPORTANT]
-> **建议升级到 v1.1.2 或更高版本。** v1.1.2 修复 macOS 13 上 app-server 输出、请求与子进程生命周期可能导致的内存持续增长，并为会话解析、进程输出和缓存补齐容量上限；发布流程新增强制全局内存风险门禁。[下载最新版本](https://github.com/shanggqm/codexU/releases/latest)。
+> **建议升级到 v1.1.3 或更高版本。** v1.1.3 修复 macOS 13 上 Claude Skill 项目路径越过文件系统根目录后无限上溯，导致启动刷新占满 CPU 和内存持续增长的问题；路径解析现在有根目录终止与循环去重双重保护。[下载最新版本](https://github.com/shanggqm/codexU/releases/latest)。
 
 [产品官网](https://shanggqm.github.io/codexU-site/) · [下载最新版本](https://github.com/shanggqm/codexU/releases/latest) · [English](README.en.md)
 
@@ -159,10 +159,10 @@ make release-all
 产物会写入 `dist/`，例如：
 
 ```text
-dist/codexU-1.1.2-mac-arm64.dmg
-dist/codexU-1.1.2-mac-arm64.dmg.sha256
-dist/codexU-1.1.2-mac-x86_64.dmg
-dist/codexU-1.1.2-mac-x86_64.dmg.sha256
+dist/codexU-1.1.3-mac-arm64.dmg
+dist/codexU-1.1.3-mac-arm64.dmg.sha256
+dist/codexU-1.1.3-mac-x86_64.dmg
+dist/codexU-1.1.3-mac-x86_64.dmg.sha256
 ```
 
 Developer ID 签名和 Apple notarization 流程见 [DISTRIBUTION.md](DISTRIBUTION.md)。

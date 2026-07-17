@@ -1,7 +1,7 @@
 # codexU
 
 > [!IMPORTANT]
-> **Upgrade to v1.1.2 or later.** v1.1.2 fixes memory growth on macOS 13 caused by unbounded app-server output and incomplete request/process cleanup, adds limits for session parsing, process output, and caches, and makes the global memory-risk review a mandatory release gate. [Download the latest release](https://github.com/shanggqm/codexU/releases/latest).
+> **Upgrade to v1.1.3 or later.** v1.1.3 fixes a macOS 13 Claude Skill project-path traversal that could continue above the filesystem root, saturating CPU and growing memory during startup refresh. Path resolution now has explicit root termination and cycle detection. [Download the latest release](https://github.com/shanggqm/codexU/releases/latest).
 
 codexU is a macOS menu bar and desktop app for tracking OpenAI Codex / ChatGPT Codex and Claude Code quota, token usage, and today's task status. It keeps the information you check most in the menu bar and main window, so you can quickly see remaining quota, reset times, and daily work progress.
 
@@ -132,10 +132,10 @@ make release-all
 Release artifacts are written to `dist/`, for example:
 
 ```text
-dist/codexU-1.1.2-mac-arm64.dmg
-dist/codexU-1.1.2-mac-arm64.dmg.sha256
-dist/codexU-1.1.2-mac-x86_64.dmg
-dist/codexU-1.1.2-mac-x86_64.dmg.sha256
+dist/codexU-1.1.3-mac-arm64.dmg
+dist/codexU-1.1.3-mac-arm64.dmg.sha256
+dist/codexU-1.1.3-mac-x86_64.dmg
+dist/codexU-1.1.3-mac-x86_64.dmg.sha256
 ```
 
 For Developer ID signing and notarization, see [DISTRIBUTION.md](DISTRIBUTION.md).

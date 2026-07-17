@@ -87,6 +87,12 @@ require_literal Sources/CodexUsageWidget/main.swift \
   'windowObservers.forEach(NotificationCenter.default.removeObserver)' '窗口 observer 集合缺少统一清理'
 require_literal Sources/CodexUsageWidget/main.swift \
   'NSEvent.removeMonitor(monitor)' '全局/局部事件 monitor 缺少对应清理'
+require_literal Sources/CodexUsageWidget/Providers/ClaudeCode/ClaudeSkillPathResolver.swift \
+  'var visitedPaths = Set<String>()' 'Claude Skill 路径上溯缺少 visited 集合，Foundation 异常父路径可能导致无限循环'
+require_literal Sources/CodexUsageWidget/Providers/ClaudeCode/ClaudeSkillPathResolver.swift \
+  'currentPath == "/"' 'Claude Skill 路径上溯缺少文件系统根目录终止条件'
+require_literal Sources/CodexUsageWidget/Providers/ClaudeCode/ClaudeSkillPathResolver.swift \
+  'shouldStopAscending(currentPath: "/", parentPath: "/..")' 'Claude Skill 路径上溯缺少 macOS 13 根目录回归测试'
 
 if ! git diff --check >/dev/null; then
   fail 'git diff --check 未通过'
@@ -98,6 +104,7 @@ timer_count="$(count_regex 'Timer\(')"
 observer_count="$(count_regex 'addObserver\(')"
 data_contents_count="$(count_regex 'Data\(contentsOf:')"
 static_collection_count="$(count_regex 'static var .*[\[\(].*[\]\)]')"
+parent_traversal_count="$(count_regex 'deletingLastPathComponent\(\)')"
 
 {
   printf '# codexU 全局内存风险门禁\n\n'
@@ -113,6 +120,7 @@ static_collection_count="$(count_regex 'static var .*[\[\(].*[\]\)]')"
   printf -- '- 重复 Timer 强引用：已扫描\n'
   printf -- '- app-server 缓冲、请求并发与超时上限：已扫描\n'
   printf -- '- session/性能缓存上限与工作集释放：已扫描\n'
+  printf -- '- 文件系统父路径上溯终止与循环去重：已扫描\n'
   printf -- '- Notification/KVO/Event monitor 清理路径：已扫描\n\n'
   printf '## 全局风险面清单\n\n'
   printf '| 风险面 | 数量 | 发布评审要求 |\n'
@@ -123,6 +131,7 @@ static_collection_count="$(count_regex 'static var .*[\[\(].*[\]\)]')"
   printf '| Notification observer | %s | 核对 removeObserver 生命周期 |\n' "$observer_count"
   printf '| Data(contentsOf:) | %s | 核对输入可信度和文件大小上限 |\n' "$data_contents_count"
   printf '| 静态可变集合候选 | %s | 核对容量上限和淘汰策略 |\n' "$static_collection_count"
+  printf '| 父路径上溯点 | %s | 核对根目录终止、循环去重与异常 Foundation 行为 |\n' "$parent_traversal_count"
 
   if (( FAILURES > 0 )); then
     printf '\n## 阻断项\n\n'
