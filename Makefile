@@ -32,7 +32,7 @@ else
 CODESIGN_FLAGS := --force --deep --options runtime --timestamp --sign "$(SIGN_IDENTITY)" $(CODESIGN_EXTRA_FLAGS)
 endif
 
-.PHONY: build run probe test-rate-limits test-statistics-time-zone test-token-counter test-task-runtime test-claude-skill-paths test-codex-session-link test-performance-monitor test-phase-one-gate test-particle-animation test-palettes test-macos-compatibility phase-one-check phase-one-soak install dmg dmg-arm64 dmg-intel checksum checksum-arm64 checksum-intel release release-arm64 release-intel release-all release-package release-check notarize verify clean clean-dist
+.PHONY: build run probe test-rate-limits test-statistics-time-zone test-token-counter test-task-runtime test-claude-skill-paths test-codex-session-link test-performance-monitor test-phase-one-gate test-particle-animation test-palettes test-macos-compatibility memory-risk-check phase-one-check phase-one-soak install dmg dmg-arm64 dmg-intel checksum checksum-arm64 checksum-intel release release-arm64 release-intel release-all release-package release-check notarize verify clean clean-dist
 
 build:
 	rm -rf "$(APP_DIR)"
@@ -89,6 +89,9 @@ test-particle-animation:
 test-palettes:
 	./scripts/test-palettes.sh
 
+memory-risk-check:
+	./scripts/check-memory-risks.sh
+
 phase-one-check: build
 	./scripts/phase-one-check.sh
 
@@ -141,10 +144,10 @@ release-all: clean-dist
 	$(MAKE) release-arm64
 	$(MAKE) release-intel
 
-release-package:
+release-package: memory-risk-check
 	./scripts/build-release-artifacts.sh "$(VERSION)"
 
-release-check:
+release-check: memory-risk-check
 	./scripts/check-release-ready.sh "$(VERSION)"
 
 notarize: dmg

@@ -1133,7 +1133,9 @@ final class CodexUsageReader {
     private let fileManager = FileManager.default
     private let localAnalyticsCacheVersion = 9
     private let sessionUsageCacheVersion = 6
-    private static let sessionUsageCacheLimit = 1_024
+    private static let memorySessionUsageCacheLimit = 64
+    private static let persistentSessionUsageCacheLimit = 1_024
+    private static let maximumPersistentCacheBytes: Int64 = 128 * 1_024 * 1_024
     private static let persistentSessionUsageCacheWriteInterval: TimeInterval = 15 * 60
     private static var sessionUsageCache: [String: SessionUsageCacheEntry] = [:]
     private static var sessionUsageCacheOrder: [String] = []
@@ -1197,10 +1199,9 @@ final class CodexUsageReader {
 
         let input = Pipe()
         let output = Pipe()
-        let error = Pipe()
         process.standardInput = input
         process.standardOutput = output
-        process.standardError = error
+        process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()
@@ -1209,10 +1210,19 @@ final class CodexUsageReader {
             return AppServerSnapshot()
         }
 
+        let writeLock = NSLock()
+        let inputHandle = input.fileHandleForWriting
+        var acceptsWrites = true
         func writeMessage(_ request: [String: Any]) {
-            if let data = try? JSONSerialization.data(withJSONObject: request) {
-                input.fileHandleForWriting.write(data)
-                input.fileHandleForWriting.write(Data("\n".utf8))
+            guard let data = try? JSONSerialization.data(withJSONObject: request) else { return }
+            writeLock.lock()
+            defer { writeLock.unlock() }
+            guard acceptsWrites else { return }
+            do {
+                try inputHandle.write(contentsOf: data)
+                try inputHandle.write(contentsOf: Data("\n".utf8))
+            } catch {
+                acceptsWrites = false
             }
         }
 
@@ -1288,21 +1298,38 @@ final class CodexUsageReader {
             }
         }
 
-        output.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
+        let outputHandle = output.fileHandleForReading
+        let readerGroup = DispatchGroup()
+        let maximumOutputBufferBytes = 1 * 1_024 * 1_024
+        readerGroup.enter()
+        DispatchQueue.global(qos: .utility).async {
+            defer { readerGroup.leave() }
+            while true {
+                let data: Data
+                do {
+                    guard let next = try outputHandle.read(upToCount: 64 * 1_024),
+                          !next.isEmpty else { break }
+                    data = next
+                } catch {
+                    break
+                }
 
-            lock.lock()
-            buffer.append(data)
-            var lines: [Data] = []
-            while let newline = buffer.firstIndex(of: 10) {
-                lines.append(buffer.subdata(in: buffer.startIndex..<newline))
-                buffer.removeSubrange(buffer.startIndex...newline)
-            }
-            lock.unlock()
+                buffer.append(data)
+                if buffer.count > maximumOutputBufferBytes {
+                    lock.lock()
+                    appServerMessages.append("app-server 输出超过安全上限")
+                    lock.unlock()
+                    [2, 3, 4].forEach(markComplete)
+                    break
+                }
 
-            for line in lines where !line.isEmpty {
-                parseLine(line)
+                while let newline = buffer.firstIndex(of: 10) {
+                    let line = buffer.subdata(in: buffer.startIndex..<newline)
+                    buffer.removeSubrange(buffer.startIndex...newline)
+                    if !line.isEmpty {
+                        parseLine(line)
+                    }
+                }
             }
         }
 
@@ -1328,14 +1355,19 @@ final class CodexUsageReader {
             lock.unlock()
         }
 
-        output.fileHandleForReading.readabilityHandler = nil
-        try? input.fileHandleForWriting.close()
+        writeLock.lock()
+        acceptsWrites = false
+        try? inputHandle.close()
+        writeLock.unlock()
         if process.isRunning {
+            let pid = process.processIdentifier
             process.terminate()
-            DispatchQueue.global(qos: .utility).async {
-                process.waitUntilExit()
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) {
+                if process.isRunning { Darwin.kill(pid, SIGKILL) }
             }
         }
+        try? outputHandle.close()
+        _ = readerGroup.wait(timeout: .now() + 1)
 
         lock.lock()
         let finalSnapshot = snapshot
@@ -1741,6 +1773,8 @@ final class CodexUsageReader {
             writePersistentSessionUsageCache()
             return cached.analytics
         }
+
+        defer { releaseSessionUsageWorkingSet() }
 
         var reusableSkillStaticInfo: [String: SkillStaticInfo] = [:]
         for skill in persistentAnalyticsCache?.analytics.skillUsages ?? [] {
@@ -2182,7 +2216,10 @@ final class CodexUsageReader {
 
     private func skillStaticInfo(for path: String) -> SkillStaticInfo {
         let url = URL(fileURLWithPath: path)
-        guard let data = try? Data(contentsOf: url) else {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+              let fileSize = values.fileSize,
+              fileSize <= 4 * 1_024 * 1_024,
+              let data = try? Data(contentsOf: url) else {
             return SkillStaticInfo(tokenEstimate: nil, byteCount: nil)
         }
 
@@ -2251,6 +2288,8 @@ final class CodexUsageReader {
         var deltas: [SessionUsageDelta] = []
         var toolCalls: [String: Int] = [:]
         var skillLoads: [SkillLoadEvent] = []
+        let maximumSessionLineBytes = 4 * 1_024 * 1_024
+        var droppingOversizedLine = false
 
         while true {
             let chunk = try? handle.read(upToCount: 64 * 1024)
@@ -2262,24 +2301,31 @@ final class CodexUsageReader {
             while let newline = buffer.firstIndex(of: 10) {
                 let lineData = buffer.subdata(in: buffer.startIndex..<newline)
                 buffer.removeSubrange(buffer.startIndex...newline)
-                processSessionLine(
-                    lineData,
-                    tokenCountNeedle: tokenCountNeedle,
-                    functionCallNeedle: functionCallNeedle,
-                    customToolCallNeedle: customToolCallNeedle,
-                    fractionalFormatter: fractionalFormatter,
-                    plainFormatter: plainFormatter,
-                    counterState: &counterState,
-                    sawTokenEvent: &sawTokenEvent,
-                    tokenEventCount: &tokenEventCount,
-                    deltas: &deltas,
-                    toolCalls: &toolCalls,
-                    skillLoads: &skillLoads
-                )
+                if !droppingOversizedLine, lineData.count <= maximumSessionLineBytes {
+                    processSessionLine(
+                        lineData,
+                        tokenCountNeedle: tokenCountNeedle,
+                        functionCallNeedle: functionCallNeedle,
+                        customToolCallNeedle: customToolCallNeedle,
+                        fractionalFormatter: fractionalFormatter,
+                        plainFormatter: plainFormatter,
+                        counterState: &counterState,
+                        sawTokenEvent: &sawTokenEvent,
+                        tokenEventCount: &tokenEventCount,
+                        deltas: &deltas,
+                        toolCalls: &toolCalls,
+                        skillLoads: &skillLoads
+                    )
+                }
+                droppingOversizedLine = false
+            }
+            if buffer.count > maximumSessionLineBytes {
+                buffer.removeAll(keepingCapacity: false)
+                droppingOversizedLine = true
             }
         }
 
-        if !buffer.isEmpty {
+        if !droppingOversizedLine, !buffer.isEmpty {
             processSessionLine(
                 buffer,
                 tokenCountNeedle: tokenCountNeedle,
@@ -2323,11 +2369,15 @@ final class CodexUsageReader {
     ) {
         Self.sessionUsageCache[key] = entry
         if markDirty {
+            if Self.persistentSessionUsageCache == nil {
+                _ = persistentSessionUsageCache()
+            }
+            Self.persistentSessionUsageCache?[key] = entry
             Self.persistentSessionUsageCacheIsDirty = true
         }
         Self.sessionUsageCacheOrder.removeAll { $0 == key }
         Self.sessionUsageCacheOrder.append(key)
-        while Self.sessionUsageCacheOrder.count > Self.sessionUsageCacheLimit {
+        while Self.sessionUsageCacheOrder.count > Self.memorySessionUsageCacheLimit {
             let evicted = Self.sessionUsageCacheOrder.removeFirst()
             Self.sessionUsageCache.removeValue(forKey: evicted)
         }
@@ -2351,7 +2401,7 @@ final class CodexUsageReader {
 
         let output = Pipe()
         process.standardOutput = output
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()
@@ -2359,7 +2409,13 @@ final class CodexUsageReader {
             return nil
         }
 
-        let data = output.fileHandleForReading.readDataToEndOfFile()
+        guard let data = readBoundedProcessOutput(
+            output.fileHandleForReading,
+            process: process,
+            maximumBytes: 32 * 1_024 * 1_024
+        ) else {
+            return nil
+        }
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 || process.terminationStatus == 1 else {
@@ -2654,9 +2710,8 @@ final class CodexUsageReader {
         process.arguments = ["-readonly", "-json", dbPath, query]
 
         let output = Pipe()
-        let error = Pipe()
         process.standardOutput = output
-        process.standardError = error
+        process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()
@@ -2665,7 +2720,14 @@ final class CodexUsageReader {
             return []
         }
 
-        let data = output.fileHandleForReading.readDataToEndOfFile()
+        guard let data = readBoundedProcessOutput(
+            output.fileHandleForReading,
+            process: process,
+            maximumBytes: 32 * 1_024 * 1_024
+        ) else {
+            PerformanceMonitor.shared.end(performanceSpan, success: false)
+            return []
+        }
         process.waitUntilExit()
 
         guard
@@ -2678,6 +2740,42 @@ final class CodexUsageReader {
 
         PerformanceMonitor.shared.end(performanceSpan)
         return json
+    }
+
+    private func readBoundedProcessOutput(
+        _ handle: FileHandle,
+        process: Process,
+        maximumBytes: Int
+    ) -> Data? {
+        defer { try? handle.close() }
+        var result = Data()
+        while true {
+            let chunk: Data
+            do {
+                guard let next = try handle.read(upToCount: 64 * 1_024),
+                      !next.isEmpty else { break }
+                chunk = next
+            } catch {
+                terminate(process)
+                return nil
+            }
+            guard chunk.count <= maximumBytes,
+                  result.count <= maximumBytes - chunk.count else {
+                terminate(process)
+                return nil
+            }
+            result.append(chunk)
+        }
+        return result
+    }
+
+    private func terminate(_ process: Process) {
+        guard process.isRunning else { return }
+        let pid = process.processIdentifier
+        process.terminate()
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) {
+            if process.isRunning { Darwin.kill(pid, SIGKILL) }
+        }
     }
 
     private func resolveCodexExecutablePath() -> String? {
@@ -2727,6 +2825,8 @@ final class CodexUsageReader {
 
     private func readPersistentLocalAnalyticsCache() -> LocalAnalyticsCacheEntry? {
         guard let url = localAnalyticsCacheURL(),
+              let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+              Int64(values.fileSize ?? 0) <= Self.maximumPersistentCacheBytes,
               let data = try? Data(contentsOf: url)
         else { return nil }
         return try? JSONDecoder().decode(LocalAnalyticsCacheEntry.self, from: data)
@@ -2738,6 +2838,8 @@ final class CodexUsageReader {
         }
 
         guard let url = sessionUsageCacheURL(),
+              let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+              Int64(values.fileSize ?? 0) <= Self.maximumPersistentCacheBytes,
               let data = try? Data(contentsOf: url),
               let diskCache = try? JSONDecoder().decode(SessionUsageDiskCache.self, from: data),
               diskCache.version == sessionUsageCacheVersion
@@ -2791,13 +2893,19 @@ final class CodexUsageReader {
     private func limitedSessionUsageCache(
         _ entries: [String: SessionUsageCacheEntry]
     ) -> [String: SessionUsageCacheEntry] {
-        guard entries.count > Self.sessionUsageCacheLimit else { return entries }
+        guard entries.count > Self.persistentSessionUsageCacheLimit else { return entries }
         let retained = entries.sorted { lhs, rhs in
             let lhsDate = lhs.value.modificationDate ?? .distantPast
             let rhsDate = rhs.value.modificationDate ?? .distantPast
             return lhsDate == rhsDate ? lhs.key < rhs.key : lhsDate > rhsDate
-        }.prefix(Self.sessionUsageCacheLimit)
+        }.prefix(Self.persistentSessionUsageCacheLimit)
         return Dictionary(uniqueKeysWithValues: retained.map { ($0.key, $0.value) })
+    }
+
+    private func releaseSessionUsageWorkingSet() {
+        Self.sessionUsageCache.removeAll(keepingCapacity: false)
+        Self.sessionUsageCacheOrder.removeAll(keepingCapacity: false)
+        Self.persistentSessionUsageCache = nil
     }
 
     private func sameSessionFileIdentity(

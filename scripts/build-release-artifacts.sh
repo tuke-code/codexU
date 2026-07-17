@@ -12,6 +12,7 @@ if [[ "$VERSION" != "$PLIST_VERSION" ]]; then
   exit 1
 fi
 
+make memory-risk-check
 plutil -lint Resources/Info.plist
 git diff --check
 
