@@ -430,6 +430,7 @@ private struct SessionUsageSource {
 private struct SessionUsageDelta: Codable {
     let date: Date
     let tokens: TokenBreakdown
+    let eventIdentity: CodexTokenEventIdentity
 }
 
 private struct SkillLoadEvent: Codable {
@@ -440,6 +441,7 @@ private struct SkillLoadEvent: Codable {
 private struct SessionUsageCacheEntry: Codable {
     let fileSize: Int64
     let modificationDate: Date?
+    let forkedFromId: String?
     let hasTokenEvents: Bool
     let tokenEventCount: Int
     let deltas: [SessionUsageDelta]
@@ -590,6 +592,7 @@ private struct LocalAnalytics: Equatable, Codable {
     let recentProjects: [ProjectUsage]
     let toolUsages: [ToolUsage]
     let skillUsages: [SkillUsage]
+    let forkBaselineTokensByThreadId: [String: Int64]
 }
 
 private struct LocalAnalyticsCacheEntry: Codable {
@@ -1131,8 +1134,8 @@ final class UsageStore: ObservableObject {
 
 final class CodexUsageReader {
     private let fileManager = FileManager.default
-    private let localAnalyticsCacheVersion = 9
-    private let sessionUsageCacheVersion = 6
+    private let localAnalyticsCacheVersion = 10
+    private let sessionUsageCacheVersion = 7
     private static let memorySessionUsageCacheLimit = 64
     private static let persistentSessionUsageCacheLimit = 1_024
     private static let maximumPersistentCacheBytes: Int64 = 128 * 1_024 * 1_024
@@ -1583,13 +1586,8 @@ final class CodexUsageReader {
         labelFormatter.locale = Locale(identifier: "zh_CN")
         labelFormatter.dateFormat = "M/d"
 
-        let totalsQuery = """
-        SELECT
-          COALESCE(SUM(tokens_used), 0) AS lifetimeTokens,
-          COALESCE(SUM(CASE WHEN updated_at >= \(Int(dayStart.timeIntervalSince1970)) THEN tokens_used ELSE 0 END), 0) AS todayTokens,
-          COALESCE(SUM(CASE WHEN updated_at >= \(Int(sevenDayStart.timeIntervalSince1970)) THEN tokens_used ELSE 0 END), 0) AS sevenDayTokens,
-          COUNT(*) AS threadCount,
-          COALESCE(MAX(updated_at), 0) AS lastUpdatedAt
+        let usageQuery = """
+        SELECT id, tokens_used AS tokens, updated_at AS updatedAt
         FROM threads;
         """
 
@@ -1600,27 +1598,34 @@ final class CodexUsageReader {
         LIMIT 5;
         """
 
-        let dailyQuery = """
-        SELECT updated_at AS updatedAt, tokens_used AS tokens
-        FROM threads
-        WHERE updated_at >= \(Int(sevenDayStart.timeIntervalSince1970))
-        ORDER BY updated_at ASC;
-        """
-
         guard
-            let totalsObject = runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: totalsQuery).first,
-            let recentObjects = Optional(runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: recentQuery)),
-            let dailyObjects = Optional(runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: dailyQuery))
+            let usageObjects = Optional(runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: usageQuery)),
+            let recentObjects = Optional(runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: recentQuery))
         else {
             messages.append("SQLite 查询失败")
             return nil
+        }
+
+        let rawAnalytics = readLocalAnalytics(
+            sqlitePath: sqlitePath,
+            dbPath: dbPath,
+            dayStart: dayStart,
+            sevenDayStart: sevenDayStart,
+            statistics: context.statistics,
+            messages: &messages
+        )
+        let forkBaselines = rawAnalytics.forkBaselineTokensByThreadId
+        func adjustedTokens(_ object: [String: Any]) -> Int64 {
+            let rawTokens = int64Value(object["tokens"]) ?? 0
+            guard let threadId = object["id"] as? String else { return rawTokens }
+            return max(rawTokens - (forkBaselines[threadId] ?? 0), 0)
         }
 
         let recent = recentObjects.map { object in
             LocalThread(
                 id: object["id"] as? String ?? UUID().uuidString,
                 title: object["title"] as? String ?? "Untitled",
-                tokens: int64Value(object["tokens"]) ?? 0,
+                tokens: adjustedTokens(object),
                 updatedAt: dateFromEpoch(object["updatedAt"]),
                 model: object["model"] as? String,
                 cwd: object["cwd"] as? String ?? "",
@@ -1629,10 +1634,25 @@ final class CodexUsageReader {
         }
 
         var tokensByDay: [String: Int64] = [:]
-        for object in dailyObjects {
+        var lifetimeTokens: Int64 = 0
+        var todayTokens: Int64 = 0
+        var sevenDayTokens: Int64 = 0
+        var lastUpdatedAt: Date?
+        for object in usageObjects {
             guard let updatedAt = dateFromEpoch(object["updatedAt"]) else { continue }
+            let tokens = adjustedTokens(object)
+            lifetimeTokens += tokens
+            if updatedAt >= sevenDayStart {
+                sevenDayTokens += tokens
+            }
+            if updatedAt >= dayStart {
+                todayTokens += tokens
+            }
+            if lastUpdatedAt == nil || updatedAt > (lastUpdatedAt ?? .distantPast) {
+                lastUpdatedAt = updatedAt
+            }
             let key = context.statistics.dayKey(for: updatedAt)
-            tokensByDay[key, default: 0] += int64Value(object["tokens"]) ?? 0
+            tokensByDay[key, default: 0] += tokens
         }
 
         let dailyBuckets = (0..<7).compactMap { index -> DailyTokenBucket? in
@@ -1645,36 +1665,35 @@ final class CodexUsageReader {
             )
         }
 
-        let approximateTodayTokens = int64Value(totalsObject["todayTokens"]) ?? 0
-        let approximateSevenDayTokens = int64Value(totalsObject["sevenDayTokens"]) ?? 0
-        let rawAnalytics = readLocalAnalytics(
-            sqlitePath: sqlitePath,
-            dbPath: dbPath,
-            dayStart: dayStart,
-            sevenDayStart: sevenDayStart,
-            statistics: context.statistics,
-            messages: &messages
-        )
         let analytics = validatedLocalAnalytics(
             rawAnalytics,
-            approximateTodayTokens: approximateTodayTokens,
-            approximateSevenDayTokens: approximateSevenDayTokens,
+            approximateTodayTokens: todayTokens,
+            approximateSevenDayTokens: sevenDayTokens,
             messages: &messages
         )
-        let allProjects = readAllTimeProjects(sqlitePath: sqlitePath, dbPath: dbPath)
+        let allProjects = readAllTimeProjects(
+            sqlitePath: sqlitePath,
+            dbPath: dbPath,
+            forkBaselines: forkBaselines
+        )
         let projectBoard = ProjectBoard(
             recentProjects: analytics.recentProjects.isEmpty
-                ? readApproximateRecentProjects(sqlitePath: sqlitePath, dbPath: dbPath, sevenDayStart: sevenDayStart)
+                ? readApproximateRecentProjects(
+                    sqlitePath: sqlitePath,
+                    dbPath: dbPath,
+                    sevenDayStart: sevenDayStart,
+                    forkBaselines: forkBaselines
+                )
                 : analytics.recentProjects,
             allProjects: allProjects
         )
 
         return LocalUsage(
-            lifetimeTokens: int64Value(totalsObject["lifetimeTokens"]) ?? 0,
-            todayTokens: approximateTodayTokens,
-            sevenDayTokens: approximateSevenDayTokens,
-            threadCount: intValue(totalsObject["threadCount"]) ?? 0,
-            lastUpdatedAt: dateFromEpoch(totalsObject["lastUpdatedAt"]),
+            lifetimeTokens: lifetimeTokens,
+            todayTokens: todayTokens,
+            sevenDayTokens: sevenDayTokens,
+            threadCount: usageObjects.count,
+            lastUpdatedAt: lastUpdatedAt,
             dailyBuckets: dailyBuckets,
             recentThreads: recent,
             detailedUsage: analytics.detailedUsage,
@@ -1683,7 +1702,8 @@ final class CodexUsageReader {
                 dbPath: dbPath,
                 dayStart: dayStart,
                 sevenDayStart: sevenDayStart,
-                calendar: calendar
+                calendar: calendar,
+                forkBaselines: forkBaselines
             ),
             projectBoard: projectBoard,
             toolUsages: analytics.toolUsages,
@@ -1724,7 +1744,8 @@ final class CodexUsageReader {
                     estimatedCostUSD: nil
                 )
             },
-            skillUsages: analytics.skillUsages
+            skillUsages: analytics.skillUsages,
+            forkBaselineTokensByThreadId: analytics.forkBaselineTokensByThreadId
         )
     }
 
@@ -1763,7 +1784,14 @@ final class CodexUsageReader {
 
         guard !sources.isEmpty else {
             messages.append("未找到 Codex session 日志")
-            return LocalAnalytics(detailedUsage: nil, usageTrend: nil, recentProjects: [], toolUsages: [], skillUsages: [])
+            return LocalAnalytics(
+                detailedUsage: nil,
+                usageTrend: nil,
+                recentProjects: [],
+                toolUsages: [],
+                skillUsages: [],
+                forkBaselineTokensByThreadId: [:]
+            )
         }
 
         let dayKey = statistics.dayKey(for: dayStart)
@@ -1822,21 +1850,46 @@ final class CodexUsageReader {
         var recentProjectUsage: [String: ProjectUsageAccumulator] = [:]
         var toolUsage: [String: ToolUsageAccumulator] = [:]
         var skillUsage: [String: SkillUsageAccumulator] = [:]
-        for source in sources {
+
+        let parsedSessions: [(source: SessionUsageSource, entry: SessionUsageCacheEntry)] = sources.compactMap { source in
             guard let entry = cachedSessionUsage(
                 source: source,
                 fractionalFormatter: fractionalFormatter,
                 plainFormatter: plainFormatter
-            ) else { continue }
+            ) else { return nil }
+            return (source, entry)
+        }
+        let entryByThreadId = Dictionary(
+            uniqueKeysWithValues: parsedSessions.map { ($0.source.threadId, $0.entry) }
+        )
+        var forkBaselineTokensByThreadId: [String: Int64] = [:]
+
+        for (source, entry) in parsedSessions {
+            let inheritedPrefixLength: Int
+            if let parentId = entry.forkedFromId,
+               let parentEntry = entryByThreadId[parentId] {
+                inheritedPrefixLength = CodexForkUsageDeduplicator.inheritedPrefixLength(
+                    child: entry.deltas.map(\.eventIdentity),
+                    parent: parentEntry.deltas.map(\.eventIdentity)
+                )
+            } else {
+                inheritedPrefixLength = 0
+            }
+            if inheritedPrefixLength > 0 {
+                forkBaselineTokensByThreadId[source.threadId] = entry.deltas
+                    .prefix(inheritedPrefixLength)
+                    .reduce(0) { $0 + $1.tokens.totalTokens }
+            }
+            let effectiveDeltas = entry.deltas.dropFirst(inheritedPrefixLength)
 
             if entry.hasTokenEvents {
                 accumulator.parsedFileCount += 1
-                accumulator.tokenEventCount += entry.tokenEventCount
+                accumulator.tokenEventCount += max(entry.tokenEventCount - inheritedPrefixLength, 0)
             }
 
             let price = modelTokenPrice(for: source.model)
             var sessionUsage = PricedTokenUsage.zero
-            for delta in entry.deltas {
+            for delta in effectiveDeltas {
                 let cost = estimatedCostUSD(tokens: delta.tokens, price: price)
                 sessionUsage.add(tokens: delta.tokens, costUSD: cost)
                 accumulator.add(
@@ -1907,7 +1960,8 @@ final class CodexUsageReader {
                 toolUsages: toolUsage.values
                     .map { $0.makeUsage() }
                     .sorted { $0.callCount == $1.callCount ? $0.name < $1.name : $0.callCount > $1.callCount },
-                skillUsages: skillUsages
+                skillUsages: skillUsages,
+                forkBaselineTokensByThreadId: forkBaselineTokensByThreadId
             )
             Self.localAnalyticsCache = LocalAnalyticsCacheEntry(
                 version: localAnalyticsCacheVersion,
@@ -1937,7 +1991,8 @@ final class CodexUsageReader {
             toolUsages: toolUsage.values
                 .map { $0.makeUsage() }
                 .sorted { $0.callCount == $1.callCount ? $0.name < $1.name : $0.callCount > $1.callCount },
-            skillUsages: skillUsages
+            skillUsages: skillUsages,
+            forkBaselineTokensByThreadId: forkBaselineTokensByThreadId
         )
         Self.localAnalyticsCache = LocalAnalyticsCacheEntry(
             version: localAnalyticsCacheVersion,
@@ -2106,7 +2161,8 @@ final class CodexUsageReader {
         dbPath: String,
         dayStart: Date,
         sevenDayStart: Date,
-        calendar: Calendar
+        calendar: Calendar,
+        forkBaselines: [String: Int64]
     ) -> UsageTrend? {
         let trendStart = calendar.date(byAdding: .day, value: -190, to: dayStart) ?? sevenDayStart
         var monthComponents = calendar.dateComponents([.year, .month], from: Date())
@@ -2117,7 +2173,7 @@ final class CodexUsageReader {
         let monthStart = calendar.date(from: monthComponents) ?? dayStart
 
         let query = """
-        SELECT updated_at AS updatedAt, tokens_used AS tokens
+        SELECT id, updated_at AS updatedAt, tokens_used AS tokens
         FROM threads
         WHERE updated_at >= \(Int(trendStart.timeIntervalSince1970))
         ORDER BY updated_at ASC;
@@ -2130,7 +2186,9 @@ final class CodexUsageReader {
         for row in rows {
             guard let updatedAt = dateFromEpoch(row["updatedAt"]) else { continue }
             let key = localDayKey(updatedAt, calendar: calendar)
-            let tokens = int64Value(row["tokens"]) ?? 0
+            let rawTokens = int64Value(row["tokens"]) ?? 0
+            let threadId = row["id"] as? String ?? ""
+            let tokens = max(rawTokens - (forkBaselines[threadId] ?? 0), 0)
             var usage = dailyUsage[key] ?? .zero
             usage.add(
                 tokens: TokenBreakdown(
@@ -2155,59 +2213,80 @@ final class CodexUsageReader {
         )
     }
 
-    private func readAllTimeProjects(sqlitePath: String, dbPath: String) -> [ProjectUsage] {
-        let query = """
-        SELECT cwd, COUNT(*) AS threadCount, COALESCE(SUM(tokens_used), 0) AS tokens, MAX(CASE WHEN recency_at > 0 THEN recency_at ELSE updated_at END) AS lastActiveAt
-        FROM threads
-        WHERE tokens_used > 0
-        GROUP BY cwd
-        ORDER BY tokens DESC
-        LIMIT 24;
-        """
-
-        return runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: query).map { row in
-            let path = row["cwd"] as? String ?? ""
-            return ProjectUsage(
-                id: path.isEmpty ? "uncategorized" : path,
-                name: path.isEmpty ? "未归类" : shortWorkspaceName(path),
-                fullPath: path,
-                tokens: int64Value(row["tokens"]) ?? 0,
-                estimatedCostUSD: nil,
-                threadCount: intValue(row["threadCount"]) ?? 0,
-                lastActiveAt: dateFromEpoch(row["lastActiveAt"]),
-                sourceQuality: .approximate
-            )
-        }
+    private func readAllTimeProjects(
+        sqlitePath: String,
+        dbPath: String,
+        forkBaselines: [String: Int64]
+    ) -> [ProjectUsage] {
+        readApproximateProjects(
+            sqlitePath: sqlitePath,
+            dbPath: dbPath,
+            updatedSince: nil,
+            forkBaselines: forkBaselines
+        )
     }
 
     private func readApproximateRecentProjects(
         sqlitePath: String,
         dbPath: String,
-        sevenDayStart: Date
+        sevenDayStart: Date,
+        forkBaselines: [String: Int64]
     ) -> [ProjectUsage] {
+        readApproximateProjects(
+            sqlitePath: sqlitePath,
+            dbPath: dbPath,
+            updatedSince: sevenDayStart,
+            forkBaselines: forkBaselines
+        )
+    }
+
+    private func readApproximateProjects(
+        sqlitePath: String,
+        dbPath: String,
+        updatedSince: Date?,
+        forkBaselines: [String: Int64]
+    ) -> [ProjectUsage] {
+        let dateFilter = updatedSince.map { "AND updated_at >= \(Int($0.timeIntervalSince1970))" } ?? ""
         let query = """
-        SELECT cwd, COUNT(*) AS threadCount, COALESCE(SUM(tokens_used), 0) AS tokens, MAX(CASE WHEN recency_at > 0 THEN recency_at ELSE updated_at END) AS lastActiveAt
+        SELECT id, cwd, tokens_used AS tokens, CASE WHEN recency_at > 0 THEN recency_at ELSE updated_at END AS lastActiveAt
         FROM threads
         WHERE tokens_used > 0
-          AND updated_at >= \(Int(sevenDayStart.timeIntervalSince1970))
-        GROUP BY cwd
-        ORDER BY tokens DESC
-        LIMIT 24;
+          \(dateFilter)
         """
 
-        return runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: query).map { row in
+        var totals: [String: (tokens: Int64, threadCount: Int, lastActiveAt: Date?)] = [:]
+        for row in runSQLiteJSON(sqlitePath: sqlitePath, dbPath: dbPath, query: query) {
             let path = row["cwd"] as? String ?? ""
-            return ProjectUsage(
+            let threadId = row["id"] as? String ?? ""
+            let rawTokens = int64Value(row["tokens"]) ?? 0
+            let tokens = max(rawTokens - (forkBaselines[threadId] ?? 0), 0)
+            let lastActiveAt = dateFromEpoch(row["lastActiveAt"])
+            var total = totals[path] ?? (tokens: 0, threadCount: 0, lastActiveAt: nil)
+            total.tokens += tokens
+            total.threadCount += 1
+            if let lastActiveAt,
+               total.lastActiveAt == nil || lastActiveAt > (total.lastActiveAt ?? .distantPast) {
+                total.lastActiveAt = lastActiveAt
+            }
+            totals[path] = total
+        }
+
+        var projects: [ProjectUsage] = []
+        for (path, total) in totals {
+            guard total.tokens > 0 else { continue }
+            projects.append(ProjectUsage(
                 id: path.isEmpty ? "uncategorized" : path,
                 name: path.isEmpty ? "未归类" : shortWorkspaceName(path),
                 fullPath: path,
-                tokens: int64Value(row["tokens"]) ?? 0,
+                tokens: total.tokens,
                 estimatedCostUSD: nil,
-                threadCount: intValue(row["threadCount"]) ?? 0,
-                lastActiveAt: dateFromEpoch(row["lastActiveAt"]),
+                threadCount: total.threadCount,
+                lastActiveAt: total.lastActiveAt,
                 sourceQuality: .approximate
-            )
+            ))
         }
+        projects.sort { $0.tokens == $1.tokens ? $0.name < $1.name : $0.tokens > $1.tokens }
+        return Array(projects.prefix(24))
     }
 
     private func makeSkillUsages(
@@ -2267,13 +2346,15 @@ final class CodexUsageReader {
             return cached
         }
 
-        let eventPattern = #""type":"(token_count|function_call|custom_tool_call)""#
+        let eventPattern = #""type":"(session_meta|token_count|function_call|custom_tool_call)""#
+        let sessionMetaNeedle = Data(#""type":"session_meta""#.utf8)
         let tokenCountNeedle = Data(#""type":"token_count""#.utf8)
         let functionCallNeedle = Data(#""type":"function_call""#.utf8)
         let customToolCallNeedle = Data(#""type":"custom_tool_call""#.utf8)
         if let parsed = parseSessionUsageWithGrep(
             url: url,
             eventPattern: eventPattern,
+            sessionMetaNeedle: sessionMetaNeedle,
             tokenCountNeedle: tokenCountNeedle,
             functionCallNeedle: functionCallNeedle,
             customToolCallNeedle: customToolCallNeedle,
@@ -2283,6 +2364,7 @@ final class CodexUsageReader {
             let entry = SessionUsageCacheEntry(
                 fileSize: fileSize,
                 modificationDate: modificationDate,
+                forkedFromId: parsed.forkedFromId,
                 hasTokenEvents: parsed.hasTokenEvents,
                 tokenEventCount: parsed.tokenEventCount,
                 deltas: parsed.deltas,
@@ -2297,6 +2379,7 @@ final class CodexUsageReader {
         defer { try? handle.close() }
 
         var buffer = Data()
+        var forkedFromId: String?
         var counterState = CodexTokenCounterState()
         var sawTokenEvent = false
         var tokenEventCount = 0
@@ -2319,11 +2402,13 @@ final class CodexUsageReader {
                 if !droppingOversizedLine, lineData.count <= maximumSessionLineBytes {
                     processSessionLine(
                         lineData,
+                        sessionMetaNeedle: sessionMetaNeedle,
                         tokenCountNeedle: tokenCountNeedle,
                         functionCallNeedle: functionCallNeedle,
                         customToolCallNeedle: customToolCallNeedle,
                         fractionalFormatter: fractionalFormatter,
                         plainFormatter: plainFormatter,
+                        forkedFromId: &forkedFromId,
                         counterState: &counterState,
                         sawTokenEvent: &sawTokenEvent,
                         tokenEventCount: &tokenEventCount,
@@ -2343,11 +2428,13 @@ final class CodexUsageReader {
         if !droppingOversizedLine, !buffer.isEmpty {
             processSessionLine(
                 buffer,
+                sessionMetaNeedle: sessionMetaNeedle,
                 tokenCountNeedle: tokenCountNeedle,
                 functionCallNeedle: functionCallNeedle,
                 customToolCallNeedle: customToolCallNeedle,
                 fractionalFormatter: fractionalFormatter,
                 plainFormatter: plainFormatter,
+                forkedFromId: &forkedFromId,
                 counterState: &counterState,
                 sawTokenEvent: &sawTokenEvent,
                 tokenEventCount: &tokenEventCount,
@@ -2360,6 +2447,7 @@ final class CodexUsageReader {
         let entry = SessionUsageCacheEntry(
             fileSize: fileSize,
             modificationDate: modificationDate,
+            forkedFromId: forkedFromId,
             hasTokenEvents: sawTokenEvent,
             tokenEventCount: tokenEventCount,
             deltas: deltas,
@@ -2401,12 +2489,13 @@ final class CodexUsageReader {
     private func parseSessionUsageWithGrep(
         url: URL,
         eventPattern: String,
+        sessionMetaNeedle: Data,
         tokenCountNeedle: Data,
         functionCallNeedle: Data,
         customToolCallNeedle: Data,
         fractionalFormatter: ISO8601DateFormatter,
         plainFormatter: ISO8601DateFormatter
-    ) -> (hasTokenEvents: Bool, tokenEventCount: Int, deltas: [SessionUsageDelta], toolCalls: [String: Int], skillLoads: [SkillLoadEvent])? {
+    ) -> (forkedFromId: String?, hasTokenEvents: Bool, tokenEventCount: Int, deltas: [SessionUsageDelta], toolCalls: [String: Int], skillLoads: [SkillLoadEvent])? {
         let grepPath = "/usr/bin/grep"
         guard fileManager.isExecutableFile(atPath: grepPath) else { return nil }
 
@@ -2438,6 +2527,7 @@ final class CodexUsageReader {
         }
 
         var buffer = data
+        var forkedFromId: String?
         var counterState = CodexTokenCounterState()
         var sawTokenEvent = false
         var tokenEventCount = 0
@@ -2450,11 +2540,13 @@ final class CodexUsageReader {
             buffer.removeSubrange(buffer.startIndex...newline)
             processSessionLine(
                 lineData,
+                sessionMetaNeedle: sessionMetaNeedle,
                 tokenCountNeedle: tokenCountNeedle,
                 functionCallNeedle: functionCallNeedle,
                 customToolCallNeedle: customToolCallNeedle,
                 fractionalFormatter: fractionalFormatter,
                 plainFormatter: plainFormatter,
+                forkedFromId: &forkedFromId,
                 counterState: &counterState,
                 sawTokenEvent: &sawTokenEvent,
                 tokenEventCount: &tokenEventCount,
@@ -2467,11 +2559,13 @@ final class CodexUsageReader {
         if !buffer.isEmpty {
             processSessionLine(
                 buffer,
+                sessionMetaNeedle: sessionMetaNeedle,
                 tokenCountNeedle: tokenCountNeedle,
                 functionCallNeedle: functionCallNeedle,
                 customToolCallNeedle: customToolCallNeedle,
                 fractionalFormatter: fractionalFormatter,
                 plainFormatter: plainFormatter,
+                forkedFromId: &forkedFromId,
                 counterState: &counterState,
                 sawTokenEvent: &sawTokenEvent,
                 tokenEventCount: &tokenEventCount,
@@ -2481,16 +2575,18 @@ final class CodexUsageReader {
             )
         }
 
-        return (sawTokenEvent, tokenEventCount, deltas, toolCalls, skillLoads)
+        return (forkedFromId, sawTokenEvent, tokenEventCount, deltas, toolCalls, skillLoads)
     }
 
     private func processSessionLine(
         _ lineData: Data,
+        sessionMetaNeedle: Data,
         tokenCountNeedle: Data,
         functionCallNeedle: Data,
         customToolCallNeedle: Data,
         fractionalFormatter: ISO8601DateFormatter,
         plainFormatter: ISO8601DateFormatter,
+        forkedFromId: inout String?,
         counterState: inout CodexTokenCounterState,
         sawTokenEvent: inout Bool,
         tokenEventCount: inout Int,
@@ -2498,13 +2594,22 @@ final class CodexUsageReader {
         toolCalls: inout [String: Int],
         skillLoads: inout [SkillLoadEvent]
     ) {
+        let isSessionMeta = lineData.range(of: sessionMetaNeedle) != nil
         let isTokenEvent = lineData.range(of: tokenCountNeedle) != nil
         let isToolEvent = lineData.range(of: functionCallNeedle) != nil || lineData.range(of: customToolCallNeedle) != nil
-        guard isTokenEvent || isToolEvent,
+        guard isSessionMeta || isTokenEvent || isToolEvent,
               let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-              let payload = object["payload"] as? [String: Any],
-              let payloadType = payload["type"] as? String
+              let payload = object["payload"] as? [String: Any]
         else { return }
+
+        if object["type"] as? String == "session_meta" {
+            if let parentId = payload["forked_from_id"] as? String, !parentId.isEmpty {
+                forkedFromId = parentId
+            }
+            return
+        }
+
+        guard let payloadType = payload["type"] as? String else { return }
 
         if payloadType == "function_call" || payloadType == "custom_tool_call" {
             if let name = payload["name"] as? String, !name.isEmpty {
@@ -2541,7 +2646,16 @@ final class CodexUsageReader {
             lastUsage: lastUsageSample,
             state: &counterState
         ) else { return }
-        deltas.append(SessionUsageDelta(date: date, tokens: delta))
+        deltas.append(
+            SessionUsageDelta(
+                date: date,
+                tokens: delta,
+                eventIdentity: CodexTokenEventIdentity(
+                    cumulative: cumulativeSample,
+                    lastUsage: lastUsageSample
+                )
+            )
+        )
     }
 
     private func readTaskBoard(context: RuntimeLoadContext, messages: inout [String]) -> TaskBoard? {
@@ -2935,7 +3049,7 @@ final class CodexUsageReader {
     }
 
     private func sessionSourcesFingerprint(_ sources: [SessionUsageSource]) -> String {
-        var components: [String] = [String(sources.count)]
+        var components: [String] = ["fork-prefix-v1", String(sources.count)]
         for source in sources {
             components.append(source.threadId)
             components.append(source.rolloutPath)
