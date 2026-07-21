@@ -3762,6 +3762,7 @@ final class AppSettings: ObservableObject {
 
 enum DashboardTab: String, CaseIterable, Equatable, Identifiable {
     case tasks
+    case leadership
     case usage
     case projects
     case skills
@@ -3934,7 +3935,7 @@ struct UsageWidgetView: View {
     }
 
     private var usageOverviewSection: some View {
-        HStack(alignment: .center, spacing: 26) {
+        HStack(alignment: .center, spacing: 14) {
             VStack(spacing: 8) {
                 DualQuotaRing(
                     fiveHourQuota: snapshot.fiveHourQuota,
@@ -3966,6 +3967,14 @@ struct UsageWidgetView: View {
                 }
             }
             .zIndex(1)
+
+            LeadershipPyramidButton(
+                snapshot: store.multiRuntimeSnapshot.leadership,
+                language: language
+            ) {
+                selectedDashboardTab = .leadership
+            }
+            .frame(width: 174)
 
             VStack(alignment: .leading, spacing: 13) {
                 HStack(spacing: 12) {
@@ -4026,6 +4035,11 @@ struct UsageWidgetView: View {
         switch selectedDashboardTab {
         case .tasks:
             taskBoardContent
+        case .leadership:
+            LeadershipDashboardPanel(
+                snapshot: store.multiRuntimeSnapshot.leadership,
+                language: language
+            )
         case .usage:
             UsageTrendPanel(
                 trend: snapshot.local?.usageTrend,
@@ -4102,6 +4116,15 @@ struct UsageWidgetView: View {
         switch selectedDashboardTab {
         case .tasks:
             return taskBoardSummary
+        case .leadership:
+            guard let report = store.multiRuntimeSnapshot.leadership.defaultReport else {
+                return language.text("正在建立记录", "Building history")
+            }
+            let score = report.score.map(String.init) ?? "--"
+            return language.text(
+                "Score \(score) · \(report.activeDayCount)/28 活跃日",
+                "Score \(score) · \(report.activeDayCount)/28 active days"
+            )
         case .usage:
             guard let trend = snapshot.local?.usageTrend else { return language.text("读取中", "Loading") }
             let quality = trend.sourceQuality == .approximate ? language.text("粗略统计", "Approx.") : language.text("精细统计", "Detailed")
@@ -5122,8 +5145,8 @@ struct DashboardTabSwitch: View {
                 )
         )
         .fixedSize(horizontal: true, vertical: false)
-        .help(language.text("切换今日任务、用量趋势和项目排行", "Switch between tasks, usage, and project rankings"))
-        .accessibilityLabel(language.text("看板标签页", "Dashboard tabs"))
+        .help(language.text("切换今日任务、AI 领导力、用量趋势和项目排行", "Switch between tasks, AI leadership, usage, and project rankings"))
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -9109,9 +9132,9 @@ private let dashboardCardHeaderSpacing: CGFloat = 8
 private let dashboardCardContentSpacing: CGFloat = 8
 private let dashboardHeaderControlHeight: CGFloat = 24
 let titlebarControlHeight: CGFloat = 18
-private let dashboardTabSegmentWidth: CGFloat = 96
+private let dashboardTabSegmentWidth: CGFloat = 91
 private let dashboardTabIconWidth: CGFloat = 14
-private let dashboardTabHorizontalPadding: CGFloat = 10
+private let dashboardTabHorizontalPadding: CGFloat = 8
 private let dashboardCardIconSize: CGFloat = 12
 private let dashboardCardIconFrame: CGFloat = 18
 private let dashboardCardTitleSize: CGFloat = 11
@@ -9209,6 +9232,8 @@ private func localizedDashboardTitle(_ tab: DashboardTab, language: WidgetLangua
     switch tab {
     case .tasks:
         return language.text("今日任务看板", "Today's task board")
+    case .leadership:
+        return language.text("AI 领导力", "AI leadership")
     case .usage:
         return language.text("用量趋势", "Usage trend")
     case .projects:
@@ -9222,6 +9247,8 @@ private func localizedDashboardTabLabel(_ tab: DashboardTab, language: WidgetLan
     switch tab {
     case .tasks:
         return language.text("今日任务", "Today")
+    case .leadership:
+        return language.text("AI 领导力", "Leadership")
     case .usage:
         return language.text("用量趋势", "Usage")
     case .projects:
@@ -9235,6 +9262,8 @@ private func dashboardTabIcon(_ tab: DashboardTab) -> String {
     switch tab {
     case .tasks:
         return "checklist"
+    case .leadership:
+        return "chart.bar.xaxis"
     case .usage:
         return "calendar"
     case .projects:
