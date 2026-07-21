@@ -23,10 +23,12 @@ final class MultiRuntimeUsageReader {
         }
         let refreshedAt = Date()
         let aggregate = aggregator.aggregate(runtimeSnapshots, at: refreshedAt)
+        let leadership = LeadershipDataReader().load(context: context)
         let snapshot = MultiRuntimeUsageSnapshot(
             refreshedAt: refreshedAt,
             runtimes: runtimeSnapshots,
             aggregate: aggregate,
+            leadership: leadership,
             statisticsIdentity: StatisticsIdentity(
                 preference: context.statistics.preference,
                 resolvedIdentifier: context.statistics.resolvedIdentifier,

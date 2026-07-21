@@ -803,6 +803,7 @@ final class UsageStore: ObservableObject {
                 refreshedAt: cached.refreshedAt,
                 runtimes: cached.runtimes,
                 aggregate: cached.aggregate,
+                leadership: cached.leadership,
                 statisticsIdentity: identity
             )
             apply(rebound)
@@ -1082,6 +1083,7 @@ final class UsageStore: ObservableObject {
             refreshedAt: multiSnapshot.refreshedAt,
             runtimes: displayedRuntimes,
             aggregate: AgentUsageAggregator().aggregate(displayedRuntimes, at: multiSnapshot.refreshedAt),
+            leadership: multiSnapshot.leadership,
             statisticsIdentity: multiSnapshot.statisticsIdentity
         )
         let nextScope = reconciledSnapshot.defaultScope(
@@ -1124,6 +1126,7 @@ final class UsageStore: ObservableObject {
             refreshedAt: multiRuntimeSnapshot.refreshedAt,
             runtimes: runtimeSnapshots,
             aggregate: aggregate,
+            leadership: multiRuntimeSnapshot.leadership,
             statisticsIdentity: multiRuntimeSnapshot.statisticsIdentity
         )
         if selectedRuntimeScope == scope {

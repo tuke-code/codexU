@@ -13,6 +13,7 @@ func dumpJSON(_ snapshot: MultiRuntimeUsageSnapshot) {
         "refreshedAt": runtimeISOString(snapshot.refreshedAt) ?? "",
         "aggregate": runtimeJSONObject(snapshot.aggregate),
         "runtimes": snapshot.runtimes.map { runtimeJSONObject($0) },
+        "leadership": leadershipJSONObject(snapshot.leadership),
         "compat": [
             "codex": codexSnapshot.map { runtimeJSONObject($0) } ?? NSNull()
         ] as [String: Any]
@@ -26,6 +27,73 @@ func dumpJSON(_ snapshot: MultiRuntimeUsageSnapshot) {
        let text = String(data: data, encoding: .utf8) {
         print(text)
     }
+}
+
+private func leadershipJSONObject(_ snapshot: LeadershipDashboardSnapshot) -> [String: Any] {
+    let today = snapshot.todayReport
+    return [
+        "modelVersion": snapshot.modelVersion,
+        "refreshedAt": runtimeISOString(snapshot.refreshedAt) ?? "",
+        "defaultReport": snapshot.defaultReport.map { leadershipJSONObject($0) } ?? NSNull(),
+        "today": today.map { report in
+            [
+                "agentCount": runtimeJSONValue(report.agentCount),
+                "aiHours": runtimeJSONValue(report.aiHours)
+            ] as [String: Any]
+        } ?? NSNull(),
+        "reports": snapshot.reports.map { leadershipJSONObject($0) }
+    ] as [String: Any]
+}
+
+private func leadershipJSONObject(_ report: LeadershipReport) -> [String: Any] {
+    [
+        "period": report.period.rawValue,
+        "runtime": report.runtimeFilter.rawValue,
+        "score": runtimeJSONValue(report.score),
+        "coreScore": runtimeJSONValue(report.coreScore),
+        "title": report.title.map { title in
+            [
+                "level": title.level,
+                "name": title.name,
+                "lowerBound": title.lowerBound,
+                "upperBound": title.upperBound
+            ] as [String: Any]
+        } ?? NSNull(),
+        "maturity": report.maturity,
+        "evidenceCoverage": report.evidenceCoverage,
+        "activeDayCount": report.activeDayCount,
+        "agentCount": runtimeJSONValue(report.agentCount),
+        "aiHours": runtimeJSONValue(report.aiHours),
+        "autonomousHours": runtimeJSONValue(report.autonomousHours),
+        "averageParallelism": runtimeJSONValue(report.averageParallelism),
+        "peakConcurrency": runtimeJSONValue(report.peakConcurrency),
+        "projectCount": report.projectCount,
+        "dimensions": report.dimensions.map { dimension in
+            [
+                "kind": dimension.kind.rawValue,
+                "score": dimension.score,
+                "confidence": dimension.confidence,
+                "summaryValue": dimension.summaryValue
+            ] as [String: Any]
+        },
+        "dailyPoints": report.dailyPoints.map { point in
+            [
+                "day": runtimeISOString(point.day) ?? "",
+                "agentCount": point.agentCount,
+                "aiHours": point.aiHours,
+                "peakConcurrency": point.peakConcurrency
+            ] as [String: Any]
+        },
+        "projects": report.projects.map { project in
+            [
+                "id": project.projectID,
+                "name": project.projectName,
+                "agentCount": project.agentCount,
+                "aiHours": project.aiHours,
+                "autonomousHours": project.autonomousHours
+            ] as [String: Any]
+        }
+    ] as [String: Any]
 }
 
 private func runtimeJSONObject(_ runtime: RuntimeUsageSnapshot) -> [String: Any] {
