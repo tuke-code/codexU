@@ -3936,6 +3936,14 @@ struct UsageWidgetView: View {
 
     private var usageOverviewSection: some View {
         HStack(alignment: .top, spacing: 14) {
+            LeadershipCommandRadiusButton(
+                snapshot: store.multiRuntimeSnapshot.leadership,
+                language: language
+            ) {
+                selectedDashboardTab = .leadership
+            }
+            .frame(width: 154)
+
             VStack(spacing: 8) {
                 DualQuotaRing(
                     fiveHourQuota: snapshot.fiveHourQuota,
@@ -3967,14 +3975,6 @@ struct UsageWidgetView: View {
                 }
             }
             .zIndex(1)
-
-            LeadershipCommandRadiusButton(
-                snapshot: store.multiRuntimeSnapshot.leadership,
-                language: language
-            ) {
-                selectedDashboardTab = .leadership
-            }
-            .frame(width: 154)
 
             VStack(alignment: .leading, spacing: 13) {
                 HStack(spacing: 12) {
