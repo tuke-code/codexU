@@ -192,7 +192,7 @@ private struct LeadershipCommandRadiusGraphic: View {
     let animates: Bool
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 12.0, paused: !animates)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !animates)) { timeline in
             Canvas(opaque: false, colorMode: .nonLinear, rendersAsynchronously: true) { context, size in
                 draw(
                     context: &context,
