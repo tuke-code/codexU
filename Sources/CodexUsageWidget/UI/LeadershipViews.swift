@@ -584,6 +584,7 @@ private struct LeadershipRankProgressHeader: View {
             GeometryReader { geometry in
                 let trackInset: CGFloat = 38
                 let trackWidth = max(geometry.size.width - trackInset * 2, 1)
+                let completedWidth = trackWidth * CGFloat(normalizedScore)
                 let progressEnd = trackInset + trackWidth * CGFloat(normalizedScore)
                 let scorePosition = score == nil
                     ? trackInset + trackWidth / 2
@@ -607,7 +608,11 @@ private struct LeadershipRankProgressHeader: View {
                                 endPoint: .trailing
                             )
                         )
-                        .frame(width: trackWidth * CGFloat(normalizedScore), height: 16)
+                        .frame(width: trackWidth, height: 16)
+                        .mask(alignment: .leading) {
+                            Capsule()
+                                .frame(width: completedWidth, height: 16)
+                        }
                         .offset(x: trackInset)
                     ForEach(1...7, id: \.self) { level in
                         Circle()
