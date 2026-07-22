@@ -36,7 +36,7 @@ struct LeadershipCommandRadiusButton: View {
                 ZStack {
                     LeadershipCommandRadiusGraphic(
                         level: displayTitle?.level ?? 0,
-                        peakConcurrency: displayPeakConcurrency,
+                        agentCount: displayTodayAgentCount ?? 0,
                         highlighted: isHovering,
                         animates: visualEnergyMode == .normal && !reduceMotion
                     )
@@ -112,7 +112,7 @@ struct LeadershipCommandRadiusButton: View {
                 }
             }
         }
-        .help(language.text("查看 AI 领导力详情；轨道节点表示滚动 28 天峰值并发", "View AI leadership details; orbit nodes represent 28-day peak concurrency"))
+        .help(language.text("查看 AI 领导力详情；轨道节点表示今日 Agent，最多显示 12 个", "View AI leadership details; orbit nodes represent today's agents, up to 12"))
     }
 
     private var preview: LeadershipPreviewFixture? {
@@ -122,10 +122,10 @@ struct LeadershipCommandRadiusButton: View {
     private var displayScore: Int? { preview?.score ?? report?.score }
     private var displayTitle: LeadershipTitle? { preview?.title ?? report?.title }
     private var displayPeakConcurrencyValue: Int? { preview?.peakConcurrency ?? report?.peakConcurrency }
-    private var displayPeakConcurrency: Int { displayPeakConcurrencyValue ?? 0 }
+    private var displayTodayAgentCount: Int? { preview?.agentCount ?? today?.agentCount }
 
     private var todayAgentValue: String {
-        preview.map { String($0.agentCount) } ?? today?.agentCount.map(String.init) ?? "--"
+        displayTodayAgentCount.map(String.init) ?? "--"
     }
 
     private var todayHoursValue: String {
@@ -184,10 +184,10 @@ struct OverviewFactTile: View {
 
 private struct LeadershipCommandRadiusGraphic: View {
     @Environment(\.visualTokens) private var visualTokens
-    static let maximumVisibleNodes = 8
+    static let maximumVisibleAgentNodes = 12
 
     let level: Int
-    let peakConcurrency: Int
+    let agentCount: Int
     let highlighted: Bool
     let animates: Bool
 
@@ -228,7 +228,7 @@ private struct LeadershipCommandRadiusGraphic: View {
             )
         }
 
-        let visibleNodeCount = min(max(peakConcurrency, 0), Self.maximumVisibleNodes)
+        let visibleNodeCount = min(max(agentCount, 0), Self.maximumVisibleAgentNodes)
         for index in 0..<visibleNodeCount {
             let ringIndex = index % max(ringCount, 1)
             let nodesOnRing = (visibleNodeCount + ringCount - 1 - ringIndex) / ringCount
