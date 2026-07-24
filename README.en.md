@@ -13,7 +13,7 @@ codexU v1.2.0 turns a new OPC question—how many AI workers one person can lead
 - **Local and private:** evaluation stays on your Mac and does not upload usage, threads, paths, logs, or account data.
 
 > [!IMPORTANT]
-> **Upgrade to v1.2.0 or later.** v1.2.0 introduces the local AI Leadership assessment model while retaining the Codex branch token deduplication fix from v1.1.5. [Download the latest release](https://github.com/shanggqm/codexU/releases/latest).
+> **Upgrade to v1.2.1 or later.** v1.2.1 fixes a startup crash that could occur with sparse AI Leadership history and adds Codex model usage trends and an activity overview. [Download the latest release](https://github.com/shanggqm/codexU/releases/latest).
 
 codexU is a macOS menu bar and desktop app for tracking OpenAI Codex / ChatGPT Codex and Claude Code quota, token usage, today's tasks, and local AI leadership. It keeps the information you check most in the menu bar and main window, so you can quickly see remaining quota, reset times, daily progress, and how much AI labor one person is directing.
 
@@ -146,10 +146,10 @@ make release-all
 Release artifacts are written to `dist/`, for example:
 
 ```text
-dist/codexU-1.2.0-mac-arm64.dmg
-dist/codexU-1.2.0-mac-arm64.dmg.sha256
-dist/codexU-1.2.0-mac-x86_64.dmg
-dist/codexU-1.2.0-mac-x86_64.dmg.sha256
+dist/codexU-1.2.1-mac-arm64.dmg
+dist/codexU-1.2.1-mac-arm64.dmg.sha256
+dist/codexU-1.2.1-mac-x86_64.dmg
+dist/codexU-1.2.1-mac-x86_64.dmg.sha256
 ```
 
 For Developer ID signing and notarization, see [DISTRIBUTION.md](DISTRIBUTION.md).
